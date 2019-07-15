@@ -79,8 +79,11 @@ class CamelsDataset(Dataset):
 
     def __getitem__(self, idx):
         """Allow for each site corresponding to multiple samples"""
-        idx_site = min(self.siteyears['RunningTotal'] > idx)
-        idx_within_site = idx - self.siteyears.iloc[idx_site-1,4]
+        idx_site = self.siteyears.index.get_loc(self.siteyears.index[self.siteyears['RunningTotal'] > idx][0])
+        if idx_site == 0:
+            idx_within_site = idx
+        else:
+            idx_within_site = idx - self.siteyears.iloc[idx_site - 1, 4]
         print("idx = ", idx, "idx_site = ", idx_site, ", idx_within_site = ", idx_within_site)
 
         """Get file names for climate and flow"""
@@ -93,12 +96,12 @@ class CamelsDataset(Dataset):
         """Extract correct years out of each file"""
         flow_data = pd.read_csv(flow_data_name, sep='\s+', skiprows=idx_within_site * self.years_per_sample * 365,
                                 nrows=self.years_per_sample * 365, header=None, usecols=[1, 2, 3, 4, 5],
-                                parse_dates=[[1, 2, 3]],
-                                names=["date", "flow(cfs)", "qc"])
+                                parse_dates=[[1, 2, 3]])
+        flow_data.columns = ["date", "flow(cfs)", "qc"]
         print("Extracted Flow Data")
 
         #  Find years for flow data
-        flow_date_start = flow_data.iloc[1, 1]
+        flow_date_start = flow_data.iloc[0, 0]
         flow_date_end = flow_date_start + pd.Timedelta('729 days')
 
         climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
@@ -106,18 +109,19 @@ class CamelsDataset(Dataset):
                                    parse_dates=True,
                                    names=["date", "dayl(s)", "prcp(mm / day)", "srad(W / m2)", "swe(mm)",
                                           "tmax(C)", "tmin(C)", "vp(Pa)"])
+        climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H') - pd.Timedelta('12 hours')
         print("Extracted Climate Data")
 
         climate_data = climate_data.loc[(climate_data['date'] >= flow_date_start) & \
                                         (climate_data['date'] <= flow_date_end)]
-
+        climate_data = climate_data.reset_index(drop=True)
 
         """Missing data label converted to 0/1"""
         d = {'A': 1, 'A:e': 1, 'M': 0}
         flow_data["qc"] = flow_data["qc"].map(d)
 
         """Merge climate and flow into one array"""
-        hyd_data = pd.concat([climate_data, flow_data], axis=1)
+        hyd_data = pd.concat([climate_data.drop('date', axis=1), flow_data.drop('date', axis=1)], axis=1)
 
         """Get signatures related to site"""
         signatures = self.signatures_frame.iloc[idx_site, 1:]
@@ -141,7 +145,7 @@ class ToTensor(object):
         # pandas data: H x C
         # torch data: C X H
         hyd_data = hyd_data.transpose()
-        hyd_data_values = hyd_data.values
+        hyd_data_values = hyd_data.values.astype(np.float64)
         """return {'hyd_data': torch.from_numpy(hyd_data_values),
                 'signatures': torch.from_numpy(signatures)}"""
         hyd_data_tensor = torch.from_numpy(hyd_data_values)
