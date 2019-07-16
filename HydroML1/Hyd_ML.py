@@ -12,10 +12,10 @@ import os
 import math
 
 # Hyperparameters
-num_epochs = 6
+num_epochs = 3
 num_classes = 10
-batch_size = 10
-learning_rate = 0.001
+batch_size = 20
+learning_rate = 0.00002
 years_per_sample = 2
 
 """
@@ -71,61 +71,76 @@ class ConvNet(nn.Module):
         out = self.fc2(out)
         return out
 
+#@profile
 
-model = ConvNet()
-model = model.double()
 
-# Loss and optimizer
-criterion = nn.SmoothL1Loss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+def profileMe():
+    model = ConvNet()
+    model = model.double()
 
-# Train the model
-total_step = len(train_loader)
-loss_list = []
-acc_list = []
-for epoch in range(num_epochs):
-    for i, (hyd_data, signatures) in enumerate(train_loader):
-        print("epoch = ", epoch, "i = ", i)
-        # Run the forward pass
-        outputs = model(hyd_data)
-        loss = criterion(outputs, np.squeeze(signatures))
-        loss_list.append(loss.item())
+    # Loss and optimizer
+    criterion = nn.SmoothL1Loss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-        # Backprop and perform Adam optimisation
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    # Train the model
+    total_step = len(train_loader)
+    loss_list = []
+    acc_list = []
+    for epoch in range(num_epochs):
+        for i, (hyd_data, signatures) in enumerate(train_loader):
+            print("epoch = ", epoch, "i = ", i)
+            #if i == 100:
+            #   exit()
+            # Run the forward pass
+            outputs = model(hyd_data)
+            if (torch.max(np.isnan(outputs.data))==1):
+                print('nan generated')
+            loss = criterion(outputs, np.squeeze(signatures))
+            if torch.isnan(loss):
+                print('loss is nan')
+            loss_list.append(loss.item())
 
-        # Track the accuracy
-        total = signatures.size(0)
-        _, predicted = torch.max(outputs.data, 1)
-        error = np.linalg.norm(outputs.data - np.squeeze(signatures))
-        acc_list.append(error)
+            # Backprop and perform Adam optimisation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        if (i + 1) % 100 == 0:
-            print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%'
-                  .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                          error))
+            # Track the accuracy
+            total = signatures.size(0)
+            _, predicted = torch.max(outputs.data, 1)
+            error = np.linalg.norm((outputs.data - np.squeeze(signatures))/np.squeeze(signatures),axis=0)
+            acc_list.append(error)
 
-# Test the model
-model.eval()
-with torch.no_grad():
-    correct = 0
-    total = 0
-    for hyd_samples, signatures in test_loader:
-        outputs = model(hyd_samples)
-        _, predicted = torch.max(outputs.data, 1)
-        total += signatures.size(0)
-        correct += (predicted == signatures).sum().item()
+            if (i + 1) % 100 == 0:
+                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.200s}%'
+                      .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
+                              str(error)))
 
-    print('Test Accuracy of the model on the 10000 test images: {} %'.format((correct / total) * 100))
+    # Test the model
+    model.eval()
+    with torch.no_grad():
+        correct = 0
+        total = 0
+        error_test = error
+        for hyd_samples, signatures in test_loader:
+            outputs = model(hyd_samples)
+            _, predicted = torch.max(outputs.data, 1)
+            error = np.linalg.norm((outputs.data - np.squeeze(signatures)) / np.squeeze(signatures), axis=0)
+            error_test = np.vstack([error_test,error])
+            #  total += signatures.size(0)
+            #  correct += (predicted == signatures).sum().item()
 
-# Save the model and plot
-torch.save(model.state_dict(), MODEL_STORE_PATH + 'conv_net_model.ckpt')
+        error_test[np.isinf(error_test)] = np.nan
+        error_test_mean = np.nanmean(error_test, axis=0)
+        print('Test Accuracy of the model on the test data: {} %'.format(error_test_mean))
 
-p = figure(y_axis_label='Loss', width=850, y_range=(0, 1), title='PyTorch ConvNet results')
-p.extra_y_ranges = {'Accuracy': Range1d(start=0, end=100)}
-p.add_layout(LinearAxis(y_range_name='Accuracy', axis_label='Accuracy (%)'), 'right')
-p.line(np.arange(len(loss_list)), loss_list)
-p.line(np.arange(len(loss_list)), np.array(acc_list) * 100, y_range_name='Accuracy', color='red')
-show(p)
+    # Save the model and plot
+    torch.save(model.state_dict(), MODEL_STORE_PATH + 'conv_net_model.ckpt')
+
+    p = figure(y_axis_label='Loss', width=850, y_range=(0, 1), title='PyTorch ConvNet results')
+    p.extra_y_ranges = {'Accuracy': Range1d(start=0, end=100)}
+    p.add_layout(LinearAxis(y_range_name='Accuracy', axis_label='Accuracy (%)'), 'right')
+    p.line(np.arange(len(loss_list)), loss_list)
+    p.line(np.arange(len(loss_list)), np.array(acc_list) * 100, y_range_name='Accuracy', color='red')
+    show(p)
+profileMe()

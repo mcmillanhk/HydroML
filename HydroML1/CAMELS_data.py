@@ -56,8 +56,11 @@ class CamelsDataset(Dataset):
             flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
                                     names=["year", "month", "day", "flow(cfs)", "qc"])
             """Find first/last year of data"""
-            minyeartmp = flow_data.min(axis=0)["year"]
-            maxyeartmp = min(flow_data.max(axis=0)["year"], maxgoodyear)
+            minyeartmp = flow_data[(flow_data["month"]==1)&(flow_data["day"]==1)].min(axis=0)["year"]
+                #  flow_data.min(axis=0)["year"]
+            maxyeartmp = flow_data[(flow_data["month"]==12)&(flow_data["day"]==30)].max(axis=0)["year"]
+            maxyeartmp = min(maxyeartmp,maxgoodyear)
+                #  min(flow_data.max(axis=0)["year"], maxgoodyear)
             numyearstmp = (maxyeartmp-minyeartmp+1)
             numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
             if idx_site == 0:
@@ -84,23 +87,23 @@ class CamelsDataset(Dataset):
             idx_within_site = idx
         else:
             idx_within_site = idx - self.siteyears.iloc[idx_site - 1, 4]
-        print("idx = ", idx, "idx_site = ", idx_site, ", idx_within_site = ", idx_within_site)
+        #  print("idx = ", idx, "idx_site = ", idx_site, ", idx_within_site = ", idx_within_site)
 
         """Get file names for climate and flow"""
         climate_file = str(self.signatures_frame.iloc[idx_site, 0]) + '_lump_cida_forcing_leap.txt'
         flow_file = str(self.signatures_frame.iloc[idx_site, 0]) +  '_streamflow_qc.txt'
         climate_data_name = os.path.join(self.root_dir_climate,climate_file)
         flow_data_name = os.path.join(self.root_dir_flow, flow_file)
-        print("Got file names")
+        #  print("Got file names")
 
         """Extract correct years out of each file"""
         flow_data = pd.read_csv(flow_data_name, sep='\s+', skiprows=idx_within_site * self.years_per_sample * 365,
                                 nrows=self.years_per_sample * 365, header=None, usecols=[1, 2, 3, 4, 5],
                                 parse_dates=[[1, 2, 3]])
         flow_data.columns = ["date", "flow(cfs)", "qc"]
-        print("Extracted Flow Data")
+        #  print("Extracted Flow Data")
 
-        #  Find years for flow data
+        #  Find years for flow da   ta
         flow_date_start = flow_data.iloc[0, 0]
         flow_date_end = flow_date_start + pd.Timedelta('729 days')
 
@@ -110,7 +113,7 @@ class CamelsDataset(Dataset):
                                    names=["date", "dayl(s)", "prcp(mm / day)", "srad(W / m2)", "swe(mm)",
                                           "tmax(C)", "tmin(C)", "vp(Pa)"])
         climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H') - pd.Timedelta('12 hours')
-        print("Extracted Climate Data")
+        #  print("Extracted Climate Data")
 
         climate_data = climate_data.loc[(climate_data['date'] >= flow_date_start) & \
                                         (climate_data['date'] <= flow_date_end)]
@@ -119,14 +122,20 @@ class CamelsDataset(Dataset):
         """Missing data label converted to 0/1"""
         d = {'A': 1, 'A:e': 1, 'M': 0}
         flow_data["qc"] = flow_data["qc"].map(d)
+        flow_data["qc"][np.isnan(flow_data["qc"])] = 1
 
         """Merge climate and flow into one array"""
         hyd_data = pd.concat([climate_data.drop('date', axis=1), flow_data.drop('date', axis=1)], axis=1)
+        if hyd_data.isnull().any().any():
+            print('nan in hyd data')
 
         """Get signatures related to site"""
         signatures = self.signatures_frame.iloc[idx_site, 1:]
         signatures = np.array([signatures])
         signatures = signatures.astype('double').reshape(-1, 1)
+        if np.isnan(signatures).any():
+            print('nan in signatures')
+
         sample = {'hyd_data': hyd_data, 'signatures': signatures}
 
         if self.transform:
