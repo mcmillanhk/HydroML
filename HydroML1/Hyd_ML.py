@@ -46,18 +46,19 @@ test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, 
 train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
+
 # Convolutional neural network (two convolutional layers)
 class ConvNet(nn.Module):
     def __init__(self):
         super(ConvNet, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv1d(9, 32, kernel_size=11, stride=1, padding=5),  # padding is (kernel_size-1)/2?
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=5, stride=5))
+            nn.Conv1d(8, 32, kernel_size=11, stride=1, padding=5),  # padding is (kernel_size-1)/2?
+            nn.ReLU())
+            #nn.MaxPool1d(kernel_size=5, stride=5))
         self.layer2 = nn.Sequential(
-            nn.Conv1d(32, 64, kernel_size=11, stride=1, padding=5),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=5, stride=5))
+            nn.Conv1d(32, 32, kernel_size=11, stride=1, padding=5),
+            nn.ReLU())
+            #nn.MaxPool1d(kernel_size=5, stride=5))
         self.drop_out = nn.Dropout()
         self.fc1 = nn.Linear(math.floor(((years_per_sample*365/5)/5)) * 64, 1000)
         self.fc2 = nn.Linear(1000, 13)
@@ -88,7 +89,7 @@ def profileMe():
     acc_list = []
     for epoch in range(num_epochs):
         for i, (hyd_data, signatures) in enumerate(train_loader):
-            print("epoch = ", epoch, "i = ", i)
+            #  print("epoch = ", epoch, "i = ", i)
             #if i == 100:
             #   exit()
             # Run the forward pass
@@ -111,10 +112,10 @@ def profileMe():
             error = np.linalg.norm((outputs.data - np.squeeze(signatures))/np.squeeze(signatures),axis=0)
             acc_list.append(error)
 
-            if (i + 1) % 100 == 0:
+            if (i + 1) % 25 == 0:
                 print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.200s}%'
                       .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                              str(error)))
+                              str(np.around(error,decimals=3))))
 
     # Test the model
     model.eval()
@@ -143,4 +144,6 @@ def profileMe():
     p.line(np.arange(len(loss_list)), loss_list)
     p.line(np.arange(len(loss_list)), np.array(acc_list) * 100, y_range_name='Accuracy', color='red')
     show(p)
+
+
 profileMe()

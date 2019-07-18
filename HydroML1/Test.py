@@ -13,5 +13,8 @@ TestCamels = Cd.CamelsDataset(csv_file, root_dir_climate, root_dir_flow, 2)
 print("Len = ", TestCamels.__len__())
 
 testoutput = TestCamels.__getitem__(0)
-
 print("Output = ", testoutput)
+testoutput = TestCamels.__getitem__(1000)
+print("Output2 = ", testoutput)
+testoutput = TestCamels.__getitem__(5000)
+print("Output3 = ", testoutput)
