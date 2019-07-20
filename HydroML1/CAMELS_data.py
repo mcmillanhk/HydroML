@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from pathlib import Path
+import datetime
 
 # Ignore warnings
 import warnings
@@ -83,10 +84,8 @@ class CamelsDataset(Dataset):
 
             """Find first/last year of data"""
             minyeartmp = flow_data[(flow_data["month"]==1)&(flow_data["day"]==1)].min(axis=0)["year"]
-                #  flow_data.min(axis=0)["year"]
             maxyeartmp = flow_data[(flow_data["month"]==12)&(flow_data["day"]==30)].max(axis=0)["year"]
             maxyeartmp = min(maxyeartmp,maxgoodyear)
-                #  min(flow_data.max(axis=0)["year"], maxgoodyear)
             numyearstmp = (maxyeartmp-minyeartmp+1)
             numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
             if idx_site == 0:
@@ -196,17 +195,25 @@ class CamelsDataset(Dataset):
         #  print("Got file names")
 
         """Extract correct years out of each file"""
-        flow_data = pd.read_csv(flow_data_name, sep='\s+', skiprows=idx_within_site * self.years_per_sample * 365,
-                                nrows=self.years_per_sample * 365, header=None, usecols=[1, 2, 3, 4, 5],
+        flow_data_ymd = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
+                                names=["year", "month", "day", "flow(cfs)", "qc"])
+        flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
                                 parse_dates=[[1, 2, 3]])
         flow_data.columns = ["date", "flow(cfs)", "qc"]
         # convert to float
         flow_data["flow(cfs)"] = flow_data["flow(cfs)"].astype(float)
-        #  print("Extracted Flow Data")
 
+        minyeartmp = flow_data_ymd[(flow_data_ymd["month"] == 1) & (flow_data_ymd["day"] == 1)].min(axis=0)["year"]
+        minyearidx = minyeartmp + idx_within_site * self.years_per_sample
         #  Find years for flow data
-        flow_date_start = flow_data.iloc[0, 0]
+        flow_date_start = pd.datetime(minyearidx, 1, 1)
         flow_date_end = flow_date_start + pd.Timedelta('729 days')
+
+        flow_data = flow_data.loc[(flow_data['date'] >= flow_date_start) & \
+                                        (flow_data['date'] <= flow_date_end)]
+        flow_data = flow_data.reset_index(drop=True)
+
+        #  print("Extracted Flow Data")
 
         climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
                                    usecols=[0, 1, 2, 3, 4, 5, 6, 7],
@@ -260,7 +267,7 @@ class CamelsDataset(Dataset):
         if np.isnan(signatures).any():
             print('nan in signatures')
 
-        sample = {'hyd_data': hyd_data, 'signatures': signatures}
+        sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start), 'hyd_data': hyd_data, 'signatures': signatures}
 
         if self.transform:
             sample = self.transform(sample)
@@ -272,7 +279,9 @@ class ToTensor(object):
     """Convert pandas data frames in sample to Tensors."""
 
     def __call__(self, sample):
-        hyd_data, signatures = sample['hyd_data'], sample['signatures']  # Extract components from input sample
+        gauge_id, date_start, hyd_data, signatures = sample['gauge_id'], sample['date_start'], sample['hyd_data'], \
+                                                     sample['signatures']
+        # Extract components from input sample
 
         # swap axes because
         # pandas data: H x C
@@ -285,4 +294,4 @@ class ToTensor(object):
         hyd_data_tensor.double()
         signatures_tensor = torch.from_numpy(signatures)
         signatures_tensor.double()
-        return [hyd_data_tensor,signatures_tensor]
+        return [gauge_id, date_start, hyd_data_tensor,signatures_tensor]

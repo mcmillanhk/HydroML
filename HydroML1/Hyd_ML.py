@@ -12,11 +12,14 @@ import os
 import math
 
 # Hyperparameters
-num_epochs = 3
+modeltype = 'Conv'  # 'LSTM'
+num_epochs = 30
 num_classes = 10
 batch_size = 20
-learning_rate = 0.00002
+learning_rate = 0.00001
 years_per_sample = 2
+hidden_dim = 1
+num_sigs = 13
 
 """
 DATA_PATH = 'C:\\Users\Andy\PycharmProjects\MNISTData'
@@ -31,7 +34,7 @@ csv_file_train = os.path.join(root_dir_signatures,'camels_hydro_train.txt')
 csv_file_test = os.path.join(root_dir_signatures,'camels_hydro_test.txt')
 
 # transforms to apply to the data
-trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
+#  trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
 
 """# MNIST dataset
 train_dataset = torchvision.datasets.MNIST(root=DATA_PATH, train=True, transform=trans, download=True)
@@ -52,20 +55,23 @@ class ConvNet(nn.Module):
     def __init__(self):
         super(ConvNet, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv1d(8, 32, kernel_size=11, stride=1, padding=5),  # padding is (kernel_size-1)/2?
+            nn.Conv1d(8, 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
             nn.ReLU())
-            #nn.MaxPool1d(kernel_size=5, stride=5))
         self.layer2 = nn.Sequential(
-            nn.Conv1d(32, 32, kernel_size=11, stride=1, padding=5),
+            nn.Conv1d(32, 32, kernel_size=11, stride=2, padding=5),
             nn.ReLU())
-            #nn.MaxPool1d(kernel_size=5, stride=5))
+        self.layer3 = nn.Sequential(
+            nn.Conv1d(32, 16, kernel_size=11, stride=2, padding=5),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=5, stride=5))
         self.drop_out = nn.Dropout()
-        self.fc1 = nn.Linear(math.floor(((years_per_sample*365/5)/5)) * 64, 1000)
-        self.fc2 = nn.Linear(1000, 13)
+        self.fc1 = nn.Linear(math.floor(((years_per_sample*365/2)/20)) * 16, 50)
+        self.fc2 = nn.Linear(50, num_sigs)
 
     def forward(self, x):
         out = self.layer1(x)
         out = self.layer2(out)
+        out = self.layer3(out)
         out = out.reshape(out.size(0), -1)
         out = self.drop_out(out)
         out = self.fc1(out)
@@ -74,29 +80,74 @@ class ConvNet(nn.Module):
 
 #@profile
 
+class LSTM(nn.Module):
+
+    def __init__(self, input_dim, hidden_dim, batch_size, output_dim=1,
+                 num_layers=2):
+        super(LSTM, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.batch_size = batch_size
+        self.num_layers = num_layers
+
+        # Define the LSTM layer
+        self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.num_layers)
+
+        # Define the output layer
+        self.linear = nn.Linear(self.hidden_dim, output_dim)
+
+    def init_hidden(self):
+        # This is what we'll initialise our hidden state as
+        return (torch.zeros(self.num_layers, self.batch_size, self.hidden_dim),
+                torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
+
+    def forward(self, input):
+        # Forward pass through LSTM layer
+        # shape of lstm_out: [input_size, batch_size, hidden_dim]
+        # shape of self.hidden: (a, b), where a and b both
+        # have shape (num_layers, batch_size, hidden_dim).
+        lstm_out, self.hidden = self.lstm(input.view(len(input), self.batch_size, -1))
+
+        # Only take the output from the final timetep
+        # Can pass on the entirety of lstm_out to the next layer if it is a seq2seq prediction
+        y_pred = self.linear(lstm_out[-1].view(self.batch_size, -1))
+        return y_pred #  .view(-1)
+
 
 def profileMe():
-    model = ConvNet()
+    if modeltype == 'Conv':
+        model = ConvNet()
+    elif modeltype == 'LSTM':
+        model = LSTM(input_dim=8, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=2)
+
     model = model.double()
 
     # Loss and optimizer
     criterion = nn.SmoothL1Loss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)  #  , weight_decay=0.005)
 
     # Train the model
     total_step = len(train_loader)
     loss_list = []
     acc_list = []
     for epoch in range(num_epochs):
-        for i, (hyd_data, signatures) in enumerate(train_loader):
-            #  print("epoch = ", epoch, "i = ", i)
+        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+            # print("epoch = ", epoch, "i = ", i)
             #if i == 100:
             #   exit()
             # Run the forward pass
+            if modeltype == 'LSTM':
+                model.hidden = model.init_hidden()
+                hyd_data=hyd_data.permute(2, 0, 1)
+
             outputs = model(hyd_data)
             if (torch.max(np.isnan(outputs.data))==1):
                 print('nan generated')
-            loss = criterion(outputs, np.squeeze(signatures))
+            signatures = np.squeeze(signatures)
+            if num_sigs==1:
+                loss = criterion(outputs[:, 0], signatures[:, 0])
+            else:
+                loss = criterion(outputs, signatures)
             if torch.isnan(loss):
                 print('loss is nan')
             loss_list.append(loss.item())
@@ -112,10 +163,14 @@ def profileMe():
             error = np.linalg.norm((outputs.data - np.squeeze(signatures))/np.squeeze(signatures),axis=0)
             acc_list.append(error)
 
-            if (i + 1) % 25 == 0:
+            if (i + 1) % 3 == 0:
                 print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.200s}%'
                       .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error,decimals=3))))
+                print('Signatures')
+                print(np.around(np.array(np.squeeze(signatures)),decimals=3))
+                print('model output')
+                print(np.around(np.array(outputs.data),decimals=3))
 
     # Test the model
     model.eval()
@@ -126,7 +181,8 @@ def profileMe():
         for hyd_samples, signatures in test_loader:
             outputs = model(hyd_samples)
             _, predicted = torch.max(outputs.data, 1)
-            error = np.linalg.norm((outputs.data - np.squeeze(signatures)) / np.squeeze(signatures), axis=0)
+            #  error = np.linalg.norm((outputs.data - np.squeeze(signatures)) / np.squeeze(signatures), axis=0)
+            error = np.linalg.norm((outputs.data - np.squeeze(signatures)), axis=0)
             error_test = np.vstack([error_test,error])
             #  total += signatures.size(0)
             #  correct += (predicted == signatures).sum().item()
