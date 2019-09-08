@@ -12,7 +12,7 @@ import os
 import math
 
 # Hyperparameters
-modeltype = 'LSTM'  # 'Conv'
+modeltype = 'AERLSTM'  #  'Conv'  # 'LSTM'
 num_epochs = 30
 num_classes = 10
 batch_size = 20
@@ -21,9 +21,7 @@ years_per_sample = 2
 hidden_dim = 1
 num_sigs = 13
 
-"""
-DATA_PATH = 'C:\\Users\Andy\PycharmProjects\MNISTData'
-"""
+
 MODEL_STORE_PATH = 'D:\\Hil_ML\\pytorch_models\\'
 
 
@@ -36,9 +34,7 @@ csv_file_test = os.path.join(root_dir_signatures,'camels_hydro_test.txt')
 # transforms to apply to the data
 #  trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
 
-"""# MNIST dataset
-train_dataset = torchvision.datasets.MNIST(root=DATA_PATH, train=True, transform=trans, download=True)
-test_dataset = torchvision.datasets.MNIST(root=DATA_PATH, train=False, transform=trans)"""
+
 # Camels Dataset
 train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_flow, years_per_sample,
                                  transform=Cd.ToTensor())
@@ -51,46 +47,38 @@ test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=Fa
 
 
 # Convolutional neural network (two convolutional layers)
-class ConvNet(nn.Module):
-    def __init__(self):
-        super(ConvNet, self).__init__()
-        self.layer1 = nn.Sequential(
-            nn.Conv1d(8, 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
-            nn.ReLU())  # ,
-            # nn.MaxPool1d(kernel_size=5, stride=5))
-        self.layer2 = nn.Sequential(
-            nn.Conv1d(32, 32, kernel_size=11, stride=2, padding=5),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2, stride=2))
-        self.layer3 = nn.Sequential(
-            nn.Conv1d(32, 16, kernel_size=11, stride=2, padding=5),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=5, stride=5))
-        self.drop_out = nn.Dropout()
-        self.fc1 = nn.Linear(math.floor(((years_per_sample*365/4)/20)) * 16, 50)
-        self.fc2 = nn.Linear(50, num_sigs)
-
-    def forward(self, x):
-        out = self.layer1(x)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = out.reshape(out.size(0), -1)
-        out = self.drop_out(out)
-        out = self.fc1(out)
-        out = self.fc2(out)
-        return out
-
-#@profile
-
-class LSTM(nn.Module):
-
+class ConvLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, batch_size, output_dim=1,
-                 num_layers=2):
-        super(LSTM, self).__init__()
+                 num_layers=):
+        super(ConvLSTM, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.batch_size = batch_size
         self.num_layers = num_layers
+
+
+        # Define the convolutional layer
+        self.layer1 = nn.Sequential(
+            nn.Conv1d(1, 3, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
+            nn.ReLU())
+
+        self.layer2 = nn.Sequential(
+            nn.Conv1d(3, 3, kernel_size=11, stride=2, padding=5),
+            nn.ReLU())
+
+        # Deconvolution layers
+        self.deconv1 = nn.Sequential(
+            nn.ConvTranspose1d(3, 3, kernel_size=11, stride=2, padding=5),
+            nn.ReLu())
+
+        self.deconv2 = nn.Sequential(
+            nn.ConvTranspose1d(3, 1, kernel_size=11, stride=2, padding=5),
+            nn.ReLu())
+
+        self.drop_out = nn.Dropout()
+
+        # Define the AE output layer
+        self.AElinear = nn.Linear(math.floor(years_per_sample*365), years_per_sample*365)
 
         # Define the LSTM layer
         self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.num_layers)
@@ -98,12 +86,22 @@ class LSTM(nn.Module):
         # Define the output layer
         self.linear = nn.Linear(self.hidden_dim, output_dim)
 
+
     def init_hidden(self):
         # This is what we'll initialise our hidden state as
         return (torch.zeros(self.num_layers, self.batch_size, self.hidden_dim),
                 torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
 
-    def forward(self, input):
+
+    def forward(self, x):
+        out = self.layer1(x)
+        out = self.layer2(out)
+        outAE = self.deconv1(out)
+        outAE = out.reshape(outAE.size(0), -1)
+        outAE = self.drop_out(outAE)
+        outAE = self.deconv2(outAE)
+        outAE = self.AElinear(outAE)
+
         # Forward pass through LSTM layer
         # shape of lstm_out: [input_size, batch_size, hidden_dim]
         # shape of self.hidden: (a, b), where a and b both
@@ -113,7 +111,13 @@ class LSTM(nn.Module):
         # Only take the output from the final timetep
         # Can pass on the entirety of lstm_out to the next layer if it is a seq2seq prediction
         y_pred = self.linear(lstm_out[-1].view(self.batch_size, -1))
-        return y_pred #  .view(-1)
+
+
+        return [outAE, y_pred]
+
+#@profile
+
+
 
 
 def profileMe():
