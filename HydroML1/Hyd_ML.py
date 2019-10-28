@@ -48,6 +48,7 @@ test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, 
 # Data loader
 train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+#train_loader = test_loader
 
 
 # Convolutional neural network (two convolutional layers)
@@ -108,11 +109,18 @@ class LSTM(nn.Module):
         # shape of lstm_out: [input_size, batch_size, hidden_dim]
         # shape of self.hidden: (a, b), where a and b both
         # have shape (num_layers, batch_size, hidden_dim).
-        lstm_out, self.hidden = self.lstm(input.view(len(input), self.batch_size, -1))
+        actual_batch_size = min(self.batch_size, input.shape[1])
+        print("actual_batch_size=", actual_batch_size, "len(input)=", len(input))
+        lstm_out, self.hidden = self.lstm(input.view(len(input), actual_batch_size, -1))
 
         # Only take the output from the final timetep
         # Can pass on the entirety of lstm_out to the next layer if it is a seq2seq prediction
-        y_pred = self.linear(lstm_out[-1].view(self.batch_size, -1))
+        #y_pred = zeros(730, 13)
+        #for i in range(0, 730):
+        #   y_pred[i][:] = self.linear(lstm_out[i].view(self.batch_size, i))
+
+        #y_pred = self.linear(lstm_out[-1].view(self.batch_size, -1))
+        y_pred = self.linear(lstm_out.view(self.batch_size, 730, -1))
         return y_pred #  .view(-1)
 
 
@@ -149,7 +157,10 @@ def profileMe():
             if num_sigs==1:
                 loss = criterion(outputs[:, 0], signatures[:, 0])
             else:
-                loss = criterion(outputs, signatures)
+                #loss = criterion(outputs, signatures.repeat(1,730,1))
+                #print(outputs.size)
+                #print(signatures.size)
+                loss = criterion(outputs, signatures.unsqueeze(1))
             if torch.isnan(loss):
                 print('loss is nan')
             loss_list.append(loss.item())
@@ -162,17 +173,17 @@ def profileMe():
             # Track the accuracy
             total = signatures.size(0)
             _, predicted = torch.max(outputs.data, 1)
-            error = np.linalg.norm((outputs.data - np.squeeze(signatures))/np.squeeze(signatures),axis=0)
+            error = np.linalg.norm((outputs.data - signatures.unsqueeze(1))/signatures.unsqueeze(1))
             acc_list.append(error)
 
             if (i + 1) % 3 == 0:
-                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.200s}%'
+                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error,decimals=3))))
-                print('Signatures')
-                print(np.around(np.array(np.squeeze(signatures)),decimals=3))
-                print('model output')
-                print(np.around(np.array(outputs.data),decimals=3))
+                #print('Signatures')
+                #print(np.around(np.array(np.squeeze(signatures)),decimals=3))
+                #print('model output')
+                #print(np.around(np.array(outputs.data),decimals=3))
 
     # Test the model
     model.eval()
