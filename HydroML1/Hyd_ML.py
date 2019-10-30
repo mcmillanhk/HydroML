@@ -48,6 +48,7 @@ test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, 
 # Data loader
 train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+#print("Making training smaller for testing...")
 #train_loader = test_loader
 
 
@@ -109,8 +110,9 @@ class LSTM(nn.Module):
         # shape of lstm_out: [input_size, batch_size, hidden_dim]
         # shape of self.hidden: (a, b), where a and b both
         # have shape (num_layers, batch_size, hidden_dim).
-        actual_batch_size = min(self.batch_size, input.shape[1])
-        print("actual_batch_size=", actual_batch_size, "len(input)=", len(input))
+        #actual_batch_size = min(self.batch_size, input.shape[1])
+        actual_batch_size = input.shape[1]
+        #print("actual_batch_size=", actual_batch_size, "len(input)=", len(input))
         lstm_out, self.hidden = self.lstm(input.view(len(input), actual_batch_size, -1))
 
         # Only take the output from the final timetep
@@ -120,7 +122,7 @@ class LSTM(nn.Module):
         #   y_pred[i][:] = self.linear(lstm_out[i].view(self.batch_size, i))
 
         #y_pred = self.linear(lstm_out[-1].view(self.batch_size, -1))
-        y_pred = self.linear(lstm_out.view(self.batch_size, 730, -1))
+        y_pred = self.linear(lstm_out.view(actual_batch_size, 730, -1))
         return y_pred #  .view(-1)
 
 
@@ -158,9 +160,12 @@ def profileMe():
                 loss = criterion(outputs[:, 0], signatures[:, 0])
             else:
                 #loss = criterion(outputs, signatures.repeat(1,730,1))
-                #print(outputs.size)
-                #print(signatures.size)
-                loss = criterion(outputs, signatures.unsqueeze(1))
+                print("outputs=",outputs.shape)
+                print("sigs=",signatures.shape)
+                signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
+                print("signatures_ref=",signatures_ref.shape)
+                print("len(signatures.shape)=",len(signatures.shape))
+                loss = criterion(outputs, signatures_ref)
             if torch.isnan(loss):
                 print('loss is nan')
             loss_list.append(loss.item())
@@ -173,7 +178,8 @@ def profileMe():
             # Track the accuracy
             total = signatures.size(0)
             _, predicted = torch.max(outputs.data, 1)
-            error = np.linalg.norm((outputs.data - signatures.unsqueeze(1))/signatures.unsqueeze(1))
+            signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
+            error = np.mean(((outputs.data - signatures_ref)/signatures_ref).numpy())
             acc_list.append(error)
 
             if (i + 1) % 3 == 0:
