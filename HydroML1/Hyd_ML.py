@@ -15,10 +15,10 @@ import math
 modeltype = 'LSTM'  # 'Conv'
 num_epochs = 30
 num_classes = 10
-batch_size = 20
-learning_rate = 0.00001
+batch_size = 50
+learning_rate = 0.1
 years_per_sample = 2
-hidden_dim = 1
+hidden_dim = 50
 num_sigs = 13
 
 """
@@ -43,11 +43,14 @@ test_dataset = torchvision.datasets.MNIST(root=DATA_PATH, train=False, transform
 train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_flow, years_per_sample,
                                  transform=Cd.ToTensor())
 test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, years_per_sample,
-                                transform=Cd.ToTensor())
+                            transform=Cd.ToTensor())
 
 # Data loader
-train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+if __name__ == '__main__':
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+else:
+    exit(1)
 #print("Making training smaller for testing...")
 #train_loader = test_loader
 
@@ -130,13 +133,13 @@ def profileMe():
     if modeltype == 'Conv':
         model = ConvNet()
     elif modeltype == 'LSTM':
-        model = LSTM(input_dim=8, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=2)
+        model = LSTM(input_dim=8, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=4)
 
     model = model.double()
 
     # Loss and optimizer
     criterion = nn.SmoothL1Loss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)  #  , weight_decay=0.005)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0.005)
 
     # Train the model
     total_step = len(train_loader)
@@ -160,11 +163,11 @@ def profileMe():
                 loss = criterion(outputs[:, 0], signatures[:, 0])
             else:
                 #loss = criterion(outputs, signatures.repeat(1,730,1))
-                print("outputs=",outputs.shape)
-                print("sigs=",signatures.shape)
+                #print("outputs=",outputs.shape)
+                #print("sigs=",signatures.shape)
                 signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-                print("signatures_ref=",signatures_ref.shape)
-                print("len(signatures.shape)=",len(signatures.shape))
+                #print("signatures_ref=",signatures_ref.shape)
+                #print("len(signatures.shape)=",len(signatures.shape))
                 loss = criterion(outputs, signatures_ref)
             if torch.isnan(loss):
                 print('loss is nan')
@@ -176,14 +179,14 @@ def profileMe():
             optimizer.step()
 
             # Track the accuracy
-            total = signatures.size(0)
+            #total = signatures.size(0)
             _, predicted = torch.max(outputs.data, 1)
             signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-            error = np.mean(((outputs.data - signatures_ref)/signatures_ref).numpy())
+            error = np.mean((np.abs(outputs.data - signatures_ref)/np.abs(signatures_ref)).numpy())
             acc_list.append(error)
 
             if (i + 1) % 3 == 0:
-                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Error norm: {:.200s}'
+                print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error,decimals=3))))
                 #print('Signatures')

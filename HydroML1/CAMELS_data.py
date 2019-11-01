@@ -10,6 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from pathlib import Path
 import datetime
+from multiprocessing import Pool
 
 # Ignore warnings
 import warnings
@@ -171,13 +172,24 @@ class CamelsDataset(Dataset):
 
         self.num_samples = runningtotaltmp
 
-
+        self.load_all = True
+        if self.load_all:
+            #pool = Pool(4)
+            self.all_items = [self.load_item(i) for i in range(0, self.num_samples)]
+            #self.all_items = pool.map(self.load_item, range(0, self.num_samples))
 
     def __len__(self):
 
         return self.num_samples
 
     def __getitem__(self, idx):
+        if self.load_all:
+            return self.all_items[idx]
+        else:
+            return self.load_item(idx)
+
+    def load_item(self, idx):
+        print('load ', idx, '/', self.num_samples)
         """Allow for each site corresponding to multiple samples"""
         idx_site = self.siteyears.index.get_loc(self.siteyears.index[self.siteyears['RunningTotal'] > idx][0])
         if idx_site == 0:
