@@ -10,15 +10,16 @@ import numpy as np
 import CAMELS_data as Cd
 import os
 import math
+import matplotlib.pyplot as plt
 
 # Hyperparameters
 modeltype = 'LSTM'  # 'Conv'
-num_epochs = 30
+num_epochs = 5
 num_classes = 10
-batch_size = 50
-learning_rate = 0.1
+batch_size = 10
+learning_rate = 0.001
 years_per_sample = 2
-hidden_dim = 50
+hidden_dim = 25
 num_sigs = 13
 
 """
@@ -46,11 +47,11 @@ test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, 
                             transform=Cd.ToTensor())
 
 # Data loader
-if __name__ == '__main__':
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
-else:
-    exit(1)
+#if __name__ == '__main__':
+train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+#else:
+#    exit(1)
 #print("Making training smaller for testing...")
 #train_loader = test_loader
 
@@ -116,7 +117,8 @@ class LSTM(nn.Module):
         #actual_batch_size = min(self.batch_size, input.shape[1])
         actual_batch_size = input.shape[1]
         #print("actual_batch_size=", actual_batch_size, "len(input)=", len(input))
-        lstm_out, self.hidden = self.lstm(input.view(len(input), actual_batch_size, -1))
+        #unneeded reshape? lstm_out, self.hidden = self.lstm(input.view(len(input), actual_batch_size, -1))
+        lstm_out, self.hidden = self.lstm(input)
 
         # Only take the output from the final timetep
         # Can pass on the entirety of lstm_out to the next layer if it is a seq2seq prediction
@@ -125,8 +127,9 @@ class LSTM(nn.Module):
         #   y_pred[i][:] = self.linear(lstm_out[i].view(self.batch_size, i))
 
         #y_pred = self.linear(lstm_out[-1].view(self.batch_size, -1))
-        y_pred = self.linear(lstm_out.view(actual_batch_size, 730, -1))
-        return y_pred #  .view(-1)
+        #Tom thinks this is wrong y_pred = self.linear(lstm_out.view(actual_batch_size, 730, -1))
+        y_pred = self.linear(lstm_out.permute(1, 0, 2))
+        return y_pred  #  .view(-1)
 
 
 def profileMe():
@@ -168,7 +171,7 @@ def profileMe():
                 signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
                 #print("signatures_ref=",signatures_ref.shape)
                 #print("len(signatures.shape)=",len(signatures.shape))
-                loss = criterion(outputs, signatures_ref)
+                loss = criterion(outputs[:, int(outputs.shape[1]/8):, :], signatures_ref)
             if torch.isnan(loss):
                 print('loss is nan')
             loss_list.append(loss.item())
@@ -185,7 +188,7 @@ def profileMe():
             error = np.mean((np.abs(outputs.data - signatures_ref)/np.abs(signatures_ref)).numpy())
             acc_list.append(error)
 
-            if (i + 1) % 3 == 0:
+            if (i + 1) % 5 == 0:
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error,decimals=3))))
@@ -193,6 +196,19 @@ def profileMe():
                 #print(np.around(np.array(np.squeeze(signatures)),decimals=3))
                 #print('model output')
                 #print(np.around(np.array(outputs.data),decimals=3))
+                num2plot = 5 # num_sigs
+                plt.close()
+                plt.subplot(2, 1, 1)
+                plt.plot(hyd_data[:, 0, :].numpy()) #Batch 0
+                #plt.show()
+                colors = plt.cm.jet(np.linspace(0, 1, num2plot))
+                #plt.plot(outputs.data[0, :, :].numpy(), color=colors) #Batch 0
+                #plt.plot(signatures.data[0, :].unsqueeze(0).repeat(730, num_sigs).numpy(), color=colors) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
+                plt.subplot(2, 1, 2)
+                for j in range(num2plot): # range(num_sigs):
+                    plt.plot(outputs.data[0, :, j].numpy(), color=colors[j, :]) #Batch 0
+                    plt.plot(signatures.data[0, j].unsqueeze(0).repeat(730, num_sigs).numpy(), color=colors[j, :]) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
+                plt.show()
 
     # Test the model
     model.eval()
