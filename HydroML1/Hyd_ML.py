@@ -11,7 +11,7 @@ import CAMELS_data as Cd
 import os
 import math
 import matplotlib.pyplot as plt
-
+import time
 # Hyperparameters
 modeltype = 'LSTM'  # 'Conv'
 num_epochs = 5
@@ -54,7 +54,10 @@ test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=Fa
 #    exit(1)
 #print("Making training smaller for testing...")
 #train_loader = test_loader
-
+def moving_average(a, n=13) :
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
 
 # Convolutional neural network (two convolutional layers)
 class ConvNet(nn.Module):
@@ -133,6 +136,9 @@ class LSTM(nn.Module):
 
 
 def profileMe():
+    fig = plt.figure()
+    shown = False
+
     if modeltype == 'Conv':
         model = ConvNet()
     elif modeltype == 'LSTM':
@@ -186,6 +192,7 @@ def profileMe():
             _, predicted = torch.max(outputs.data, 1)
             signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
             error = np.mean((np.abs(outputs.data - signatures_ref)/np.abs(signatures_ref)).numpy())
+
             acc_list.append(error)
 
             if (i + 1) % 5 == 0:
@@ -197,18 +204,38 @@ def profileMe():
                 #print('model output')
                 #print(np.around(np.array(outputs.data),decimals=3))
                 num2plot = 5 # num_sigs
-                plt.close()
-                plt.subplot(2, 1, 1)
-                plt.plot(hyd_data[:, 0, :].numpy()) #Batch 0
+                #plt.close()
+                fig.clear()
+                ax_input = fig.add_subplot(3, 1, 1)
+                ax_input.plot(hyd_data[:, 0, :].numpy()) #Batch 0
                 #plt.show()
                 colors = plt.cm.jet(np.linspace(0, 1, num2plot))
                 #plt.plot(outputs.data[0, :, :].numpy(), color=colors) #Batch 0
                 #plt.plot(signatures.data[0, :].unsqueeze(0).repeat(730, num_sigs).numpy(), color=colors) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
-                plt.subplot(2, 1, 2)
+                ax_sigs = fig.add_subplot(3, 1, 2)
                 for j in range(num2plot): # range(num_sigs):
-                    plt.plot(outputs.data[0, :, j].numpy(), color=colors[j, :]) #Batch 0
-                    plt.plot(signatures.data[0, j].unsqueeze(0).repeat(730, num_sigs).numpy(), color=colors[j, :]) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
-                plt.show()
+                    ax_sigs.plot(outputs.data[0, :, j].numpy(), color=colors[j, :]) #Batch 0
+                    ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(730, num_sigs).numpy(), color=colors[j, :]) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
+                ax1 = fig.add_subplot(3, 1, 3)
+                ax1.plot(acc_list, color='r')
+                ax1.plot(moving_average(acc_list), color='#AA0000')
+                ax1.set_ylabel("error (red)")
+
+                ax2 = ax1.twinx()
+                ax2.plot(loss_list, color='b')
+                ax2.plot(moving_average(loss_list), color='#0000AA')
+                ax2.set_ylabel("loss (blue)")
+
+                #plt.show()
+
+                if not shown:
+                    fig.show()
+                    shown = True
+                else:
+                    fig.canvas.draw()
+                    fig.canvas.flush_events()
+                    plt.pause(0.000000000001)
+                    #time.sleep(0.01)
 
     # Test the model
     model.eval()

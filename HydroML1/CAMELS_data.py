@@ -83,6 +83,15 @@ class CamelsDataset(Dataset):
                                        names=["date", "dayl(s)", "prcp(mm / day)", "srad(W / m2)", "swe(mm)",
                                               "tmax(C)", "tmin(C)", "vp(Pa)"])
 
+            #flow_data = flow_data[flow_data.qc != 'M']
+            """Missing data label converted to 0/1"""
+            d = {'A': 0, 'A:e': 0, 'M': 1}
+            flow_data["qc"] = flow_data["qc"].map(d)
+            flow_data["qc"][np.isnan(flow_data["qc"])] = 1
+            flow_data["qc"] = flow_data["qc"].cumsum()  # accumulate
+            # first_bad_sample = flow_data[flow_data["qc"] == 1].iloc[0]
+            flow_data = flow_data[flow_data.qc == 0]
+
             """Find first/last year of data"""
             minyeartmp = flow_data[(flow_data["month"]==1)&(flow_data["day"]==1)].min(axis=0)["year"]
             maxyeartmp = flow_data[(flow_data["month"]==12)&(flow_data["day"]==30)].max(axis=0)["year"]
@@ -96,8 +105,13 @@ class CamelsDataset(Dataset):
 
             """Calculate flow data average"""
             flow_data_mmd_mean = np.nanmean(flow_data['flow(cfs)'])*0.101947/self.area_data.loc[gauge_id, 'area_gages2']
+
+            #flow_data['flow(cfs)'] = flow_data['flow(cfs)'].replace(-999, np.nan)
+
             flow_std = np.nanstd(flow_data['flow(cfs)']) * 0.101947 / self.area_data.loc[
                 gauge_id, 'area_gages2']
+
+            climate_data = climate_data.replace(-999, np.nan)
 
             """Calculate climate data mean and std"""
             dayl_mean = np.nanmean(climate_data["dayl(s)"])
@@ -218,10 +232,10 @@ class CamelsDataset(Dataset):
         """Missing data label converted to 0/1"""
         d = {'A': 0, 'A:e': 0, 'M': 1}
         flow_data["qc"] = flow_data["qc"].map(d)
-        flow_data["qc"][np.isnan(flow_data["qc"])] = 1
-        flow_data["qc"] = flow_data["qc"].cumsum() # accumulate
-        #first_bad_sample = flow_data[flow_data["qc"] == 1].iloc[0]
-        flow_data = flow_data[flow_data.qc == 0]
+        #flow_data["qc"][np.isnan(flow_data["qc"])] = 1
+        #flow_data["qc"] = flow_data["qc"].cumsum() # accumulate
+        ##first_bad_sample = flow_data[flow_data["qc"] == 1].iloc[0]
+        #flow_data = flow_data[flow_data.qc == 0]
 
         minyeartmp = flow_data_ymd[(flow_data_ymd["month"] == 1) & (flow_data_ymd["day"] == 1)].min(axis=0)["year"]
         minyearidx = minyeartmp + idx_within_site * self.years_per_sample
@@ -279,7 +293,7 @@ class CamelsDataset(Dataset):
         signatures = self.signatures_frame.iloc[idx_site, 1:]
         signatures = np.array([signatures])
         signatures = signatures.astype('double').reshape(-1, 1)
-        if np.isnan(signatures).any(): # or [signatures == -999].any():
+        if np.isnan(signatures).any() or signatures[signatures == -999].any():
             print('nan in signatures')
 
         sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start), 'hyd_data': hyd_data, 'signatures': signatures}
