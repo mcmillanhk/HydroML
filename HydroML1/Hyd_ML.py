@@ -14,10 +14,10 @@ import matplotlib.pyplot as plt
 import time
 # Hyperparameters
 modeltype = 'LSTM'  # 'Conv'
-num_epochs = 5
-num_classes = 10
-batch_size = 10
-learning_rate = 0.001
+num_epochs = 2
+#num_classes = 10
+batch_size = 20
+learning_rate = 0.0001 # 0.001 works well for the subset
 years_per_sample = 2
 hidden_dim = 25
 num_sigs = 13
@@ -49,7 +49,7 @@ test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, 
 # Data loader
 #if __name__ == '__main__':
 train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+test_loader = DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 #else:
 #    exit(1)
 #print("Making training smaller for testing...")
@@ -136,13 +136,12 @@ class LSTM(nn.Module):
 
 
 def profileMe():
-    fig = plt.figure()
     shown = False
 
     if modeltype == 'Conv':
         model = ConvNet()
     elif modeltype == 'LSTM':
-        model = LSTM(input_dim=8, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=4)
+        model = LSTM(input_dim=8, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=2)
 
     model = model.double()
 
@@ -205,18 +204,21 @@ def profileMe():
                 #print(np.around(np.array(outputs.data),decimals=3))
                 num2plot = 5 # num_sigs
                 #plt.close()
-                fig.clear()
+                fig = plt.figure()
+                #fig.clear()
                 ax_input = fig.add_subplot(3, 1, 1)
+                ax_sigs = fig.add_subplot(3, 1, 2)
+                ax1 = fig.add_subplot(3, 1, 3)
+                fig.canvas.draw()
+
                 ax_input.plot(hyd_data[:, 0, :].numpy()) #Batch 0
                 #plt.show()
                 colors = plt.cm.jet(np.linspace(0, 1, num2plot))
                 #plt.plot(outputs.data[0, :, :].numpy(), color=colors) #Batch 0
                 #plt.plot(signatures.data[0, :].unsqueeze(0).repeat(730, num_sigs).numpy(), color=colors) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
-                ax_sigs = fig.add_subplot(3, 1, 2)
                 for j in range(num2plot): # range(num_sigs):
                     ax_sigs.plot(outputs.data[0, :, j].numpy(), color=colors[j, :]) #Batch 0
-                    ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(730, num_sigs).numpy(), color=colors[j, :]) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
-                ax1 = fig.add_subplot(3, 1, 3)
+                    ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(outputs.shape[1], num_sigs).numpy(), color=colors[j, :]) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
                 ax1.plot(acc_list, color='r')
                 ax1.plot(moving_average(acc_list), color='#AA0000')
                 ax1.set_ylabel("error (red)")
@@ -230,8 +232,9 @@ def profileMe():
 
                 if not shown:
                     fig.show()
-                    shown = True
+                    #shown = True
                 else:
+                    #This isn't working../
                     fig.canvas.draw()
                     fig.canvas.flush_events()
                     plt.pause(0.000000000001)
@@ -242,29 +245,58 @@ def profileMe():
     with torch.no_grad():
         correct = 0
         total = 0
-        error_test = error
-        for hyd_samples, signatures in test_loader:
-            outputs = model(hyd_samples)
-            _, predicted = torch.max(outputs.data, 1)
+        #error_test = error
+        error_test = None
+        error_baseline = None
+        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(test_loader):
+            #print (signatures)
+            #for hyd_samples, signatures in test_loader:
+            outputs = model(hyd_data.permute(2, 0, 1))
+            #_, predicted = torch.max(outputs.data, 1)
+            predicted = outputs[:, -1, :]
+
             #  error = np.linalg.norm((outputs.data - np.squeeze(signatures)) / np.squeeze(signatures), axis=0)
-            error = np.linalg.norm((outputs.data - np.squeeze(signatures)), axis=0)
-            error_test = np.vstack([error_test,error])
+            error = predicted.squeeze() - signatures.squeeze()
+            error_bl = signatures # relative to predicting 0 for everything
+            if error_test is None:
+                error_test = error
+                error_baseline = error_bl
+            else:
+                error_test = np.vstack([error_test, error])
+                error_baseline = np.vstack([error_baseline, error_bl])
             #  total += signatures.size(0)
             #  correct += (predicted == signatures).sum().item()
 
         error_test[np.isinf(error_test)] = np.nan
-        error_test_mean = np.nanmean(error_test, axis=0)
-        print('Test Accuracy of the model on the test data: {} %'.format(error_test_mean))
+        error_test_mean = np.nanmean(np.fabs(error_test), axis=0)
+        print('Test Accuracy of the model on the test data (mean abs error): {} %'.format(error_test_mean))
+        error_baseline_mean = np.nanmean(np.fabs(error_baseline), axis=0)
+        print('Baseline test accuracy (mean abs error): {} %'.format(error_baseline_mean))
 
+    #np.linalg.norm(error_test, axis=0)
     # Save the model and plot
-    torch.save(model.state_dict(), MODEL_STORE_PATH + 'conv_net_model.ckpt')
+    torch.save(model.state_dict(), MODEL_STORE_PATH + 'lstm_net_model.ckpt')
 
-    p = figure(y_axis_label='Loss', width=850, y_range=(0, 1), title='PyTorch ConvNet results')
-    p.extra_y_ranges = {'Accuracy': Range1d(start=0, end=100)}
-    p.add_layout(LinearAxis(y_range_name='Accuracy', axis_label='Accuracy (%)'), 'right')
-    p.line(np.arange(len(loss_list)), loss_list)
-    p.line(np.arange(len(loss_list)), np.array(acc_list) * 100, y_range_name='Accuracy', color='red')
-    show(p)
+    errorfig = plt.figure()
+    ax_errorfig = errorfig.add_subplot(2, 1, 1)
+    x = np.array(range(num_sigs))
+    #ax_errorfig.bar(x=x, label="Test_Error", height=error_test_mean)
+    #ax_errorfig.bar(x=x, label="Baseline_Error", height=error_baseline_mean)
+    ax_errorfig.plot(x, error_test_mean, label="Test_Error")
+    ax_errorfig.plot(x, error_baseline_mean, label="Baseline_Error")
+    ax_errorfig.legend()
+
+    #boxwhisker = plt.figure()
+    ax_boxwhisker = errorfig.add_subplot(2, 1, 2)
+    ax_boxwhisker.boxplot(error_test)
+    errorfig.show()
+
+    #p = figure(y_axis_label='Loss', width=850, y_range=(0, 1), title='PyTorch results')
+    #p.extra_y_ranges = {'Accuracy': Range1d(start=0, end=100)}
+    #p.add_layout(LinearAxis(y_range_name='Accuracy', axis_label='Accuracy (%)'), 'right')
+    #p.line(np.arange(len(loss_list)), loss_list)
+    #p.line(np.arange(len(loss_list)), np.array(acc_list) * 100, y_range_name='Accuracy', color='red')
+    #show(p)
 
 
 profileMe()

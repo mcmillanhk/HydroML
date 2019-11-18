@@ -68,7 +68,7 @@ class CamelsDataset(Dataset):
                                                  "tmax_av", "tmin_av", "vp_av",
                                                  "dayl_std", "prcp_std", "srad_std", "swe_std",
                                                  "tmax_std", "tmin_std", "vp_std"])
-        for idx_site in range(int(self.num_sites/20)): #Load less sites
+        for idx_site in range(int(self.num_sites)): #Load less sites
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
             flow_file = gauge_id + '_streamflow_qc.txt'
@@ -94,10 +94,18 @@ class CamelsDataset(Dataset):
 
             """Find first/last year of data"""
             minyeartmp = flow_data[(flow_data["month"]==1)&(flow_data["day"]==1)].min(axis=0)["year"]
+            if np.isnan(minyeartmp):
+                minyeartmp = -1
             maxyeartmp = flow_data[(flow_data["month"]==12)&(flow_data["day"]==30)].max(axis=0)["year"]
-            maxyeartmp = min(maxyeartmp,maxgoodyear)
+            if np.isnan(maxyeartmp):
+                maxyeartmp = minyeartmp
+            maxyeartmp = min(maxyeartmp, maxgoodyear)
             numyearstmp = (maxyeartmp-minyeartmp+1)
-            numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
+            numsamplestmp=0
+            try:
+                numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
+            except:
+                print("break")
             if idx_site == 0:
                 runningtotaltmp = numsamplestmp
             else:
