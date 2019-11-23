@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import time
 # Hyperparameters
 modeltype = 'LSTM'  # 'Conv'
-num_epochs = 2
+num_epochs = 20
 #num_classes = 10
 batch_size = 20
 learning_rate = 0.0001 # 0.001 works well for the subset
@@ -176,7 +176,10 @@ def profileMe():
                 signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
                 #print("signatures_ref=",signatures_ref.shape)
                 #print("len(signatures.shape)=",len(signatures.shape))
-                loss = criterion(outputs[:, int(outputs.shape[1]/8):, :], signatures_ref)
+                #Whole sequence
+                #loss = criterion(outputs[:, int(outputs.shape[1]/8):, :], signatures_ref)
+                #final value only
+                loss = criterion(outputs[:, -1, :], signatures_ref[:, 0, :])
             if torch.isnan(loss):
                 print('loss is nan')
             loss_list.append(loss.item())
@@ -190,7 +193,7 @@ def profileMe():
             #total = signatures.size(0)
             _, predicted = torch.max(outputs.data, 1)
             signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-            error = np.mean((np.abs(outputs.data - signatures_ref)/np.abs(signatures_ref)).numpy())
+            error = np.mean((np.abs(outputs.data - signatures_ref)/(0.5*(np.abs(signatures_ref) + np.abs(outputs.data)) + 1e-8)).numpy())
 
             acc_list.append(error)
 

@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore")
 class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
-    def __init__(self, csv_file, root_dir_climate, root_dir_flow, years_per_sample,  transform=None):
+    def __init__(self, csv_file, root_dir_climate, root_dir_flow, years_per_sample, transform=None):
         """
         Args:
             csv_file (string): Path to the csv file with signatures.
@@ -31,6 +31,8 @@ class CamelsDataset(Dataset):
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
+        self.normalize_inputs = False
+        self.normalize_outputs = False
 
         maxgoodyear = 2013  # Don't use any years after this
 
@@ -64,9 +66,11 @@ class CamelsDataset(Dataset):
         self.siteyears = pd.DataFrame(index = self.signatures_frame.iloc[:, 0],
                                       columns = ['MinYear', 'MaxYear', 'NumYears', 'NumSamples', 'RunningTotal',
                                                  'Flowmean_mmd','flow_std',
-                                                 "dayl_av", "prcp_av", "srad_av", "swe_av",
+                                                 "dayl_av", "prcp_av", "srad_av",
+                                                 "swe_av",
                                                  "tmax_av", "tmin_av", "vp_av",
-                                                 "dayl_std", "prcp_std", "srad_std", "swe_std",
+                                                 "dayl_std", "prcp_std", "srad_std",
+                                                 "swe_std",
                                                  "tmax_std", "tmin_std", "vp_std"])
         for idx_site in range(int(self.num_sites)): #Load less sites
             """Read in climate and flow data for this site"""
@@ -140,13 +144,23 @@ class CamelsDataset(Dataset):
             """Write to table"""
             self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]] = \
                 [minyeartmp, maxyeartmp, numyearstmp, numsamplestmp, runningtotaltmp, flow_data_mmd_mean, flow_std,
-                 dayl_mean, prcp_mean, srad_mean, swe_mean, tmax_mean, tmin_mean, vp_mean,
-                 dayl_std, prcp_std, srad_std, swe_std, tmax_std, tmin_std, vp_std]
+                 dayl_mean, prcp_mean, srad_mean,
+                 swe_mean, tmax_mean, tmin_mean, vp_mean,
+                 dayl_std, prcp_std, srad_std,
+                 swe_std, tmax_std, tmin_std, vp_std]
 
         """Normalization of signatures"""
         sig_norm = self.signatures_frame.iloc[:, 1:]
         sig_norm_mean = np.nanmean(sig_norm,axis=0)
         sig_norm_std = np.nanstd(sig_norm,axis=0)
+        if not self.normalize_outputs:
+            sig_norm_mean = sig_norm_mean*0
+            sig_norm_std = sig_norm_std*0+1
+            sig_norm_std[7] = 20
+            sig_norm_std[9] = 100
+            sig_norm_std[10] = 20
+            sig_norm_std[12] = 100
+
         self.signatures_frame.iloc[:, 1:] = ((self.signatures_frame.iloc[:, 1:] - sig_norm_mean)/sig_norm_std)
 
         """Normalization of flow data"""
@@ -189,7 +203,8 @@ class CamelsDataset(Dataset):
                                    [tmax_overall_mean, tmax_overall_std],
                                    [tmin_overall_mean, tmin_overall_std],
                                    [vp_overall_mean, vp_overall_std]]),
-                                    index=['dayl', 'prcp', 'srad', 'swe', 'tmax', 'tmin', 'vp'],
+                                    index=['dayl', 'prcp', 'srad',
+                                           'swe', 'tmax', 'tmin', 'vp'],
                                     columns=['mean', 'std'])
 
         self.num_samples = runningtotaltmp
@@ -258,10 +273,11 @@ class CamelsDataset(Dataset):
         #  print("Extracted Flow Data")
 
         climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
-                                   usecols=[0, 1, 2, 3, 4, 5, 6, 7],
+                                   usecols=[0, 1, 2, 3, 4,
+                                            5, 6, 7],
                                    parse_dates=True,
-                                   names=["date", "dayl(s)", "prcp(mm / day)", "srad(W / m2)", "swe(mm)",
-                                          "tmax(C)", "tmin(C)", "vp(Pa)"])
+                                   names=["date", "dayl(s)", "prcp(mm / day)", "srad(W / m2)",
+                                          "swe(mm)", "tmax(C)", "tmin(C)", "vp(Pa)"])
         climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H') - pd.Timedelta('12 hours')
         #  print("Extracted Climate Data")
 
@@ -270,27 +286,32 @@ class CamelsDataset(Dataset):
         climate_data = climate_data.reset_index(drop=True)
 
         """Normalize climate data"""
-        climate_data["dayl(s)"] = ((climate_data["dayl(s)"] - self.climate_norm.loc["dayl","mean"])/
-                                   self.climate_norm.loc["dayl","std"])
-        climate_data["prcp(mm / day)"] = ((climate_data["prcp(mm / day)"])/
-                                          self.climate_norm.loc["prcp","std"])
-        climate_data["srad(W / m2)"] = ((climate_data["srad(W / m2)"] - self.climate_norm.loc["srad","mean"])/
-                                        self.climate_norm.loc["srad","std"])
-        climate_data["swe(mm)"] = ((climate_data["swe(mm)"] - self.climate_norm.loc["swe","mean"])/
-                                   self.climate_norm.loc["swe","std"])
-        climate_data["tmax(C)"] = ((climate_data["tmax(C)"] - self.climate_norm.loc["tmax","mean"])/
-                                   self.climate_norm.loc["tmax","std"])
-        climate_data["tmin(C)"] = ((climate_data["tmin(C)"] - self.climate_norm.loc["tmin","mean"])/
-                                   self.climate_norm.loc["tmin","std"])
-        climate_data["vp(Pa)"] = ((climate_data["vp(Pa)"] - self.climate_norm.loc["vp","mean"])/
-                                  self.climate_norm.loc["vp","std"])
+        # These have high means
+        climate_data["dayl(s)"] = ((climate_data["dayl(s)"] - self.climate_norm.loc["dayl", "mean"]) /
+                                   self.climate_norm.loc["dayl", "std"])
+        climate_data["vp(Pa)"] = ((climate_data["vp(Pa)"] - self.climate_norm.loc["vp", "mean"]) /
+                                  self.climate_norm.loc["vp", "std"])
+
+        if self.normalize_inputs:
+            climate_data["prcp(mm / day)"] = ((climate_data["prcp(mm / day)"])/
+                                              self.climate_norm.loc["prcp","std"])
+            climate_data["srad(W / m2)"] = ((climate_data["srad(W / m2)"] - self.climate_norm.loc["srad","mean"])/
+                                            self.climate_norm.loc["srad","std"])
+            climate_data["swe(mm)"] = ((climate_data["swe(mm)"] - self.climate_norm.loc["swe","mean"])/
+                                       self.climate_norm.loc["swe","std"])
+            climate_data["tmax(C)"] = ((climate_data["tmax(C)"] - self.climate_norm.loc["tmax","mean"])/
+                                       self.climate_norm.loc["tmax","std"])
+            climate_data["tmin(C)"] = ((climate_data["tmin(C)"] - self.climate_norm.loc["tmin","mean"])/
+                                       self.climate_norm.loc["tmin","std"])
 
         """Normalize flow data"""
         """First to mm/d"""
         flow_area = self.area_data.loc[gauge_id, 'area_gages2']
         flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * 0.101947 / flow_area
-        """Then normalize"""
-        flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0,0])/self.flow_norm.iloc[0,1])
+
+        if self.normalize_inputs:
+            """Then normalize"""
+            flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0, 0])/self.flow_norm.iloc[0, 1])
 
         """Merge climate and flow into one array"""
         hyd_data = pd.concat([climate_data.drop(['date', 'swe(mm)'], axis=1), flow_data.drop('date', axis=1)], axis=1, join='inner')
