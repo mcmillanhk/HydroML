@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore")
 class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
-    def __init__(self, csv_file, root_dir_climate, root_dir_flow, years_per_sample, transform=None):
+    def __init__(self, csv_file, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample, transform=None):
         """
         Args:
             csv_file (string): Path to the csv file with signatures.
@@ -30,11 +30,34 @@ class CamelsDataset(Dataset):
             root_dir (string): Directory with all the rain, ET, flow data.
             transform (callable, optional): Optional transform to be applied
                 on a sample.
+
+            csv_file_attrib: list of files containing gauge_id; several attributes. Doesn't seem to be any -999's in here
+            attribs: dict of attrib/normalizing factor for each site
         """
         self.normalize_inputs = False
         self.normalize_outputs = False
 
         maxgoodyear = 2013  # Don't use any years after this
+
+        self.attrib_files = None
+        for file in csv_file_attrib:
+            attrib_file = pd.read_csv(file, sep=';')
+            print('Loaded columns ' + str(attrib_file.columns) + ' from ' + file)
+            # Could do some labels-to-1-hot
+            if self.attrib_files is None:
+                self.attrib_files = attrib_file
+            else:
+                self.attrib_files = pd.merge(left=self.attrib_files, right=attrib_file, left_on='gauge_id',
+                                             right_on='gauge_id')
+        self.attrib_files = self.attrib_files[['gauge_id'] + list(attribs.keys())]
+
+        for name, normalizer in attribs.items():
+            self.attrib_files[name] = self.attrib_files[name].transform(lambda x: x*normalizer)
+            if np.isnan(self.attrib_files[name]).any():
+                median = np.nanmedian(self.attrib_files[name])
+                #self.attrib_files[name] = self.attrib_files[name].transform(lambda x: median if np.isnan(x) else x)
+                self.attrib_files[name][np.isnan(self.attrib_files[name])] = median
+                print("Replacing nan with median=" + str(median) + " in " + name)
 
         col_names = pd.read_csv(csv_file, nrows=0).columns
         types_dict = {'gauge_id': str}
@@ -72,7 +95,7 @@ class CamelsDataset(Dataset):
                                                  "dayl_std", "prcp_std", "srad_std",
                                                  "swe_std",
                                                  "tmax_std", "tmin_std", "vp_std"])
-        for idx_site in range(int(self.num_sites)): #Load less sites
+        for idx_site in range(int(self.num_sites/10)): #Load less sites
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
             flow_file = gauge_id + '_streamflow_qc.txt'
@@ -156,7 +179,9 @@ class CamelsDataset(Dataset):
         if not self.normalize_outputs:
             sig_norm_mean = sig_norm_mean*0
             sig_norm_std = sig_norm_std*0+1
+            sig_norm_std[6] = 20
             sig_norm_std[7] = 20
+            sig_norm_std[8] = 20
             sig_norm_std[9] = 100
             sig_norm_std[10] = 20
             sig_norm_std[12] = 100
@@ -291,12 +316,12 @@ class CamelsDataset(Dataset):
                                    self.climate_norm.loc["dayl", "std"])
         climate_data["vp(Pa)"] = ((climate_data["vp(Pa)"] - self.climate_norm.loc["vp", "mean"]) /
                                   self.climate_norm.loc["vp", "std"])
+        climate_data["srad(W / m2)"] = ((climate_data["srad(W / m2)"] - self.climate_norm.loc["srad", "mean"]) /
+                                        self.climate_norm.loc["srad", "std"])
 
         if self.normalize_inputs:
             climate_data["prcp(mm / day)"] = ((climate_data["prcp(mm / day)"])/
                                               self.climate_norm.loc["prcp","std"])
-            climate_data["srad(W / m2)"] = ((climate_data["srad(W / m2)"] - self.climate_norm.loc["srad","mean"])/
-                                            self.climate_norm.loc["srad","std"])
             climate_data["swe(mm)"] = ((climate_data["swe(mm)"] - self.climate_norm.loc["swe","mean"])/
                                        self.climate_norm.loc["swe","std"])
             climate_data["tmax(C)"] = ((climate_data["tmax(C)"] - self.climate_norm.loc["tmax","mean"])/
@@ -314,18 +339,27 @@ class CamelsDataset(Dataset):
             flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0, 0])/self.flow_norm.iloc[0, 1])
 
         """Merge climate and flow into one array"""
-        hyd_data = pd.concat([climate_data.drop(['date', 'swe(mm)'], axis=1), flow_data.drop('date', axis=1)], axis=1, join='inner')
+        hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date', 'swe(mm)'], axis=1)], axis=1, join='inner')
+
+        #print('Load ' + gauge_id)
+        attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == int(gauge_id)]
+        for key in attribs.columns:
+            if key != 'gauge_id':
+                hyd_data[key] = attribs[key].iloc[0]
+
         if hyd_data.isnull().any().any() or hyd_data.isin([-999]).any().any():
-            print('nan in hyd data')
+            raise Exception('nan in hyd data')
 
         """Get signatures related to site"""
         signatures = self.signatures_frame.iloc[idx_site, 1:]
         signatures = np.array([signatures])
         signatures = signatures.astype('double').reshape(-1, 1)
         if np.isnan(signatures).any() or signatures[signatures == -999].any():
-            print('nan in signatures')
+            raise Exception('nan in signatures')
 
-        sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start), 'hyd_data': hyd_data, 'signatures': signatures}
+        #hyd_data is t x i
+        sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start),
+                  'hyd_data': hyd_data, 'signatures': signatures}
 
         if self.transform:
             sample = self.transform(sample)

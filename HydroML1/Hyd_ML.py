@@ -14,13 +14,14 @@ import matplotlib.pyplot as plt
 import time
 # Hyperparameters
 modeltype = 'LSTM'  # 'Conv'
-num_epochs = 20
+num_epochs = 5
 #num_classes = 10
 batch_size = 20
-learning_rate = 0.0001 # 0.001 works well for the subset
+learning_rate = 0.00005 # 0.001 works well for the subset. So does .0001
 years_per_sample = 2
-hidden_dim = 25
+hidden_dim = 100
 num_sigs = 13
+num_layers = 2
 
 """
 DATA_PATH = 'C:\\Users\Andy\PycharmProjects\MNISTData'
@@ -31,8 +32,30 @@ MODEL_STORE_PATH = 'D:\\Hil_ML\\pytorch_models\\'
 root_dir_flow = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'usgs_streamflow')
 root_dir_climate = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'basin_mean_forcing', 'daymet')
 root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
-csv_file_train = os.path.join(root_dir_signatures,'camels_hydro_train.txt')
-csv_file_test = os.path.join(root_dir_signatures,'camels_hydro_test.txt')
+csv_file_train = os.path.join(root_dir_signatures, 'camels_hydro_train.txt')
+csv_file_test = os.path.join(root_dir_signatures, 'camels_hydro_test.txt')
+
+csv_file_attrib = [os.path.join(root_dir_signatures, 'camels_' + s + '.txt') for s in ['soil', 'topo', 'vege', 'geol']]
+attribs = {'carbonate_rocks_frac': 1.0, # Numbers, not categories, from geol.
+           'geol_porostiy': 1.0,
+           'geol_permeability': 0.1,
+           'soil_depth_pelletier': 0.1, #everything from soil
+           'soil_depth_statsgo': 1,
+           'soil_porosity': 1,
+           'soil_conductivity': 1,
+           'max_water_content': 1,
+           'sand_frac': 0.01, #These are percentages
+           'silt_frac': 0.01,
+           'clay_frac': 0.01,
+           'water_frac': 0.01,
+           'organic_frac': 0.01,
+           'other_frac': 0.01,
+           'elev_mean': 0.001, #topo: not lat/long
+           'slope_mean': 0.01,
+           'area_gages2': 0.001, #only the reliable of the 2 areas
+           'gvf_max': 1, #leaf area index seems totally correlated with these
+           'gvf_diff': 1,
+           }
 
 # transforms to apply to the data
 #  trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
@@ -41,9 +64,9 @@ csv_file_test = os.path.join(root_dir_signatures,'camels_hydro_test.txt')
 train_dataset = torchvision.datasets.MNIST(root=DATA_PATH, train=True, transform=trans, download=True)
 test_dataset = torchvision.datasets.MNIST(root=DATA_PATH, train=False, transform=trans)"""
 # Camels Dataset
-train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_flow, years_per_sample,
+train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample,
                                  transform=Cd.ToTensor())
-test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, years_per_sample,
+test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample,
                             transform=Cd.ToTensor())
 
 # Data loader
@@ -93,13 +116,14 @@ class ConvNet(nn.Module):
 
 class LSTM(nn.Module):
 
-    def __init__(self, input_dim, hidden_dim, batch_size, output_dim=1,
-                 num_layers=2):
+    def __init__(self, input_dim, hidden_dim, batch_size, output_dim,
+                 num_layers):
         super(LSTM, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.batch_size = batch_size
         self.num_layers = num_layers
+        self.dropout = 0.5
 
         # Define the LSTM layer
         self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.num_layers)
@@ -138,16 +162,18 @@ class LSTM(nn.Module):
 def profileMe():
     shown = False
 
+    input_dim = 8 + len(attribs)
     if modeltype == 'Conv':
         model = ConvNet()
     elif modeltype == 'LSTM':
-        model = LSTM(input_dim=8, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=2)
+        model = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=num_layers)
 
     model = model.double()
 
     # Loss and optimizer
     criterion = nn.SmoothL1Loss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0.005)
+    optimizer = torch.optim.Adam(model.parameters(),
+                                 lr=learning_rate, weight_decay=0.005)
 
     # Train the model
     total_step = len(train_loader)
@@ -302,4 +328,108 @@ def profileMe():
     #show(p)
 
 
-profileMe()
+#profileMe()
+#torch.save(model.state_dict(), MODEL_STORE_PATH + 'lstm_net_model.ckpt')
+
+input_dim = 8 + len(attribs)
+encoder = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
+               num_layers=num_layers).double()
+
+encoding_length = num_sigs
+decoder_input_dim = input_dim + encoding_length - 1  # -1 for flow
+decoder_hidden_dim = 25
+output_dim = 1
+output_layers = 2
+
+
+encoder.load_state_dict(torch.load(MODEL_STORE_PATH + 'lstm_net_model-overfit.ckpt'))
+
+decoder = LSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size, output_dim=output_dim,
+               num_layers=output_layers).double()
+
+#for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+    # print (signatures)
+    # for hyd_samples, signatures in test_loader:
+#    outputs = encoder(hyd_data.permute(2, 0, 1))
+#    predicted = outputs[:, -1, :]
+
+# Loss and optimizer
+criterion = nn.SmoothL1Loss()
+optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()),
+                             lr=learning_rate, weight_decay=0.005)
+
+# Train the model
+total_step = len(train_loader)
+loss_list = []
+acc_list = []
+for epoch in range(num_epochs):
+    for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+
+        hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
+
+        # Run the forward pass
+        encoder.hidden = encoder.init_hidden()
+        temp = encoder(hyd_data) # b x t x o
+        encoding = temp[:, -1, :] # b x o
+
+        print("Encoding " + str(encoding))
+
+        decoder.hidden = decoder.init_hidden()
+
+        flow = hyd_data[:, :, 0] # t x b
+        hyd_data = hyd_data[:, :, 1:]
+        steps = hyd_data.shape[0]
+        actual_batch_size = hyd_data.shape[1]
+
+        encoding_unsqueezed = torch.from_numpy(np.ones((steps, actual_batch_size, encoding.size(1))))
+        encoding_unsqueezed = encoding_unsqueezed*encoding.unsqueeze(0)
+        hyd_data = torch.cat((hyd_data, encoding_unsqueezed), 2) # t x b x i
+
+        outputs = decoder(hyd_data) # b x t x 1
+        if torch.max(np.isnan(outputs.data))==1:
+            raise Exception('nan generated')
+
+        outputs = outputs.permute(1, 0, 2).squeeze() # t x b
+
+        spinup = int(steps / 8)
+        gt_flow_after_start = flow[spinup:, :]
+        output_flow_after_start = outputs[spinup:, :]
+        loss = criterion(output_flow_after_start.squeeze(), gt_flow_after_start)
+        if torch.isnan(loss):
+            raise Exception('loss is nan')
+
+        loss_list.append(loss.item())
+
+        # Backprop and perform Adam optimisation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Track the accuracy
+        #signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
+        error = np.mean((gt_flow_after_start - output_flow_after_start).detach().numpy())
+
+        acc_list.append(error)
+
+        if (i + 1) % 5 == 0:
+            print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
+                  .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
+                          str(np.around(error,decimals=3))))
+            fig = plt.figure()
+            ax_input = fig.add_subplot(3, 1, 1)
+            #ax_sigs = fig.add_subplot(3, 1, 2)
+            ax_loss = fig.add_subplot(3, 1, 3)
+            fig.canvas.draw()
+
+            ax_input.plot(outputs[:, 0].detach().numpy()) #Batch 0
+            ax_input.plot(flow[:, 0].detach().numpy()) #Batch 0
+            ax_loss.plot(acc_list, color='r')
+            ax_loss.plot(moving_average(acc_list), color='#AA0000')
+            ax_loss.set_ylabel("error (red)")
+
+            #ax2 = ax1.twinx()
+            #ax2.plot(loss_list, color='b')
+            #ax2.plot(moving_average(loss_list), color='#0000AA')
+            #ax2.set_ylabel("loss (blue)")
+
+            fig.show()
