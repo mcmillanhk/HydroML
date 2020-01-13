@@ -95,7 +95,7 @@ class CamelsDataset(Dataset):
                                                  "dayl_std", "prcp_std", "srad_std",
                                                  "swe_std",
                                                  "tmax_std", "tmin_std", "vp_std"])
-        for idx_site in range(int(self.num_sites/10)): #Load less sites
+        for idx_site in range(int(self.num_sites/1)): #Load less sites
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
             flow_file = gauge_id + '_streamflow_qc.txt'
@@ -291,7 +291,7 @@ class CamelsDataset(Dataset):
         flow_date_start = pd.datetime(minyearidx, 1, 1)
         flow_date_end = flow_date_start + pd.Timedelta('729 days')
 
-        flow_data = flow_data.loc[(flow_data['date'] >= flow_date_start) & \
+        flow_data = flow_data.loc[(flow_data['date'] >= flow_date_start) &
                                         (flow_data['date'] <= flow_date_end)]
         flow_data = flow_data.reset_index(drop=True)
 
@@ -360,6 +360,7 @@ class CamelsDataset(Dataset):
         #hyd_data is t x i
         sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start),
                   'hyd_data': hyd_data, 'signatures': signatures}
+
 
         if self.transform:
             sample = self.transform(sample)

@@ -159,7 +159,7 @@ class LSTM(nn.Module):
         return y_pred  #  .view(-1)
 
 
-def profileMe():
+def train_encoder_only():
     shown = False
 
     input_dim = 8 + len(attribs)
@@ -187,7 +187,10 @@ def profileMe():
             # Run the forward pass
             if modeltype == 'LSTM':
                 model.hidden = model.init_hidden()
-                hyd_data=hyd_data.permute(2, 0, 1)
+                hyd_data=hyd_data.permute(2, 0, 1) # b x i x t -> t x b x i
+
+            if epoch == 0:
+                hyd_data = only_rain(hyd_data)
 
             outputs = model(hyd_data)
             if (torch.max(np.isnan(outputs.data))==1):
@@ -196,16 +199,10 @@ def profileMe():
             if num_sigs==1:
                 loss = criterion(outputs[:, 0], signatures[:, 0])
             else:
-                #loss = criterion(outputs, signatures.repeat(1,730,1))
-                #print("outputs=",outputs.shape)
-                #print("sigs=",signatures.shape)
                 signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-                #print("signatures_ref=",signatures_ref.shape)
-                #print("len(signatures.shape)=",len(signatures.shape))
-                #Whole sequence
-                #loss = criterion(outputs[:, int(outputs.shape[1]/8):, :], signatures_ref)
+                loss = criterion(outputs[:, int(outputs.shape[1]/8):, :], signatures_ref)
                 #final value only
-                loss = criterion(outputs[:, -1, :], signatures_ref[:, 0, :])
+                #loss = criterion(outputs[:, -1, :], signatures_ref[:, 0, :])
             if torch.isnan(loss):
                 print('loss is nan')
             loss_list.append(loss.item())
@@ -304,7 +301,7 @@ def profileMe():
 
     #np.linalg.norm(error_test, axis=0)
     # Save the model and plot
-    torch.save(model.state_dict(), MODEL_STORE_PATH + 'lstm_net_model.ckpt')
+    torch.save(model.state_dict(), MODEL_STORE_PATH + 'lstm_net_model-retrain.ckpt')
 
     errorfig = plt.figure()
     ax_errorfig = errorfig.add_subplot(2, 1, 1)
@@ -328,8 +325,16 @@ def profileMe():
     #show(p)
 
 
-#profileMe()
-#torch.save(model.state_dict(), MODEL_STORE_PATH + 'lstm_net_model.ckpt')
+def only_rain(ihyd_data):
+    iflow = ihyd_data[:, :, 0].clone()
+    rain = ihyd_data[:, :, 3].clone()
+    ihyd_data *= 0
+    ihyd_data[:, :, 0] = iflow
+    ihyd_data[:, :, 3] = rain
+    return ihyd_data
+
+
+train_encoder_only()
 
 input_dim = 8 + len(attribs)
 encoder = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
@@ -340,9 +345,11 @@ decoder_input_dim = input_dim + encoding_length - 1  # -1 for flow
 decoder_hidden_dim = 25
 output_dim = 1
 output_layers = 2
+coupled_learning_rate = learning_rate * 10
+output_epochs = 25
 
 
-encoder.load_state_dict(torch.load(MODEL_STORE_PATH + 'lstm_net_model-overfit.ckpt'))
+encoder.load_state_dict(torch.load(MODEL_STORE_PATH + 'lstm_net_model-retrain.ckpt'))
 
 decoder = LSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size, output_dim=output_dim,
                num_layers=output_layers).double()
@@ -356,13 +363,13 @@ decoder = LSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch
 # Loss and optimizer
 criterion = nn.SmoothL1Loss()
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()),
-                             lr=learning_rate, weight_decay=0.005)
+                             lr=coupled_learning_rate, weight_decay=0.005)
 
 # Train the model
 total_step = len(train_loader)
 loss_list = []
 acc_list = []
-for epoch in range(num_epochs):
+for epoch in range(output_epochs):
     for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
 
         hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
@@ -372,18 +379,22 @@ for epoch in range(num_epochs):
         temp = encoder(hyd_data) # b x t x o
         encoding = temp[:, -1, :] # b x o
 
-        print("Encoding " + str(encoding))
+        #print("Encoding " + str(encoding))
 
         decoder.hidden = decoder.init_hidden()
 
-        flow = hyd_data[:, :, 0] # t x b
-        hyd_data = hyd_data[:, :, 1:]
         steps = hyd_data.shape[0]
         actual_batch_size = hyd_data.shape[1]
 
         encoding_unsqueezed = torch.from_numpy(np.ones((steps, actual_batch_size, encoding.size(1))))
         encoding_unsqueezed = encoding_unsqueezed*encoding.unsqueeze(0)
         hyd_data = torch.cat((hyd_data, encoding_unsqueezed), 2) # t x b x i
+
+        if epoch == 0:
+            hyd_data = only_rain(hyd_data)
+
+        flow = hyd_data[:, :, 0] # t x b
+        hyd_data = hyd_data[:, :, 1:]
 
         outputs = decoder(hyd_data) # b x t x 1
         if torch.max(np.isnan(outputs.data))==1:
@@ -413,8 +424,8 @@ for epoch in range(num_epochs):
 
         if (i + 1) % 5 == 0:
             print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
-                  .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                          str(np.around(error,decimals=3))))
+                  .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
+                          str(np.around(error, decimals=3))))
             fig = plt.figure()
             ax_input = fig.add_subplot(3, 1, 1)
             #ax_sigs = fig.add_subplot(3, 1, 2)
@@ -433,3 +444,6 @@ for epoch in range(num_epochs):
             #ax2.set_ylabel("loss (blue)")
 
             fig.show()
+
+torch.save(encoder.state_dict(), MODEL_STORE_PATH + 'encoder.ckpt')
+torch.save(decoder.state_dict(), MODEL_STORE_PATH + 'decoder.ckpt')
