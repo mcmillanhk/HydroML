@@ -14,14 +14,15 @@ import matplotlib.pyplot as plt
 import time
 # Hyperparameters
 modeltype = 'LSTM'  # 'Conv'
-num_epochs = 5
+num_epochs = 2
 #num_classes = 10
 batch_size = 20
-learning_rate = 0.00005 # 0.001 works well for the subset. So does .0001
+learning_rate = 0.00001 # 0.001 works well for the subset. So does .0001
 years_per_sample = 2
 hidden_dim = 100
 num_sigs = 13
 num_layers = 2
+encoding_dim = 25
 
 """
 DATA_PATH = 'C:\\Users\Andy\PycharmProjects\MNISTData'
@@ -117,19 +118,21 @@ class ConvNet(nn.Module):
 class LSTM(nn.Module):
 
     def __init__(self, input_dim, hidden_dim, batch_size, output_dim,
-                 num_layers):
+                 num_layers, encoding_dim):
         super(LSTM, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.batch_size = batch_size
         self.num_layers = num_layers
         self.dropout = 0.5
+        self.output_encoding = False
 
         # Define the LSTM layer
         self.lstm = nn.LSTM(self.input_dim, self.hidden_dim, self.num_layers)
 
         # Define the output layer
-        self.linear = nn.Linear(self.hidden_dim, output_dim)
+        self.linear_encoding = nn.Linear(self.hidden_dim, encoding_dim)
+        self.linear_sigs = nn.Linear(encoding_dim, output_dim)
 
     def init_hidden(self):
         # This is what we'll initialise our hidden state as
@@ -154,9 +157,10 @@ class LSTM(nn.Module):
         #   y_pred[i][:] = self.linear(lstm_out[i].view(self.batch_size, i))
 
         #y_pred = self.linear(lstm_out[-1].view(self.batch_size, -1))
-        #Tom thinks this is wrong y_pred = self.linear(lstm_out.view(actual_batch_size, 730, -1))
-        y_pred = self.linear(lstm_out.permute(1, 0, 2))
-        return y_pred  #  .view(-1)
+        y_pred = self.linear_encoding(lstm_out.permute(1, 0, 2))  # b x t x e
+        if not self.output_encoding:
+            y_pred = self.linear_sigs(y_pred)  # b x t x s
+        return y_pred
 
 
 def train_encoder_only():
@@ -166,7 +170,7 @@ def train_encoder_only():
     if modeltype == 'Conv':
         model = ConvNet()
     elif modeltype == 'LSTM':
-        model = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=num_layers)
+        model = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=num_layers, encoding_dim=encoding_dim)
 
     model = model.double()
 
@@ -220,31 +224,22 @@ def train_encoder_only():
 
             acc_list.append(error)
 
-            if (i + 1) % 5 == 0:
+            if (i + 1) % 50 == 0:
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error,decimals=3))))
-                #print('Signatures')
-                #print(np.around(np.array(np.squeeze(signatures)),decimals=3))
-                #print('model output')
-                #print(np.around(np.array(outputs.data),decimals=3))
-                num2plot = 5 # num_sigs
-                #plt.close()
+                num2plot = 5  # num_sigs
                 fig = plt.figure()
-                #fig.clear()
                 ax_input = fig.add_subplot(3, 1, 1)
                 ax_sigs = fig.add_subplot(3, 1, 2)
                 ax1 = fig.add_subplot(3, 1, 3)
                 fig.canvas.draw()
 
                 ax_input.plot(hyd_data[:, 0, :].numpy()) #Batch 0
-                #plt.show()
                 colors = plt.cm.jet(np.linspace(0, 1, num2plot))
-                #plt.plot(outputs.data[0, :, :].numpy(), color=colors) #Batch 0
-                #plt.plot(signatures.data[0, :].unsqueeze(0).repeat(730, num_sigs).numpy(), color=colors) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
                 for j in range(num2plot): # range(num_sigs):
-                    ax_sigs.plot(outputs.data[0, :, j].numpy(), color=colors[j, :]) #Batch 0
-                    ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(outputs.shape[1], num_sigs).numpy(), color=colors[j, :]) #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
+                    ax_sigs.plot(outputs.data[0, :, j].numpy(), color=colors[j, :])  #Batch 0
+                    ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(outputs.shape[1], num_sigs).numpy(), color=colors[j, :])  #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
                 ax1.plot(acc_list, color='r')
                 ax1.plot(moving_average(acc_list), color='#AA0000')
                 ax1.set_ylabel("error (red)")
@@ -269,19 +264,12 @@ def train_encoder_only():
     # Test the model
     model.eval()
     with torch.no_grad():
-        correct = 0
-        total = 0
-        #error_test = error
         error_test = None
         error_baseline = None
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(test_loader):
-            #print (signatures)
-            #for hyd_samples, signatures in test_loader:
             outputs = model(hyd_data.permute(2, 0, 1))
-            #_, predicted = torch.max(outputs.data, 1)
             predicted = outputs[:, -1, :]
 
-            #  error = np.linalg.norm((outputs.data - np.squeeze(signatures)) / np.squeeze(signatures), axis=0)
             error = predicted.squeeze() - signatures.squeeze()
             error_bl = signatures # relative to predicting 0 for everything
             if error_test is None:
@@ -290,8 +278,6 @@ def train_encoder_only():
             else:
                 error_test = np.vstack([error_test, error])
                 error_baseline = np.vstack([error_baseline, error_bl])
-            #  total += signatures.size(0)
-            #  correct += (predicted == signatures).sum().item()
 
         error_test[np.isinf(error_test)] = np.nan
         error_test_mean = np.nanmean(np.fabs(error_test), axis=0)
@@ -301,28 +287,19 @@ def train_encoder_only():
 
     #np.linalg.norm(error_test, axis=0)
     # Save the model and plot
-    torch.save(model.state_dict(), MODEL_STORE_PATH + 'lstm_net_model-retrain.ckpt')
+    torch.save(model.state_dict(), MODEL_STORE_PATH + 'lstm_net_model-2outputlayer.ckpt')
 
     errorfig = plt.figure()
     ax_errorfig = errorfig.add_subplot(2, 1, 1)
     x = np.array(range(num_sigs))
-    #ax_errorfig.bar(x=x, label="Test_Error", height=error_test_mean)
-    #ax_errorfig.bar(x=x, label="Baseline_Error", height=error_baseline_mean)
     ax_errorfig.plot(x, error_test_mean, label="Test_Error")
     ax_errorfig.plot(x, error_baseline_mean, label="Baseline_Error")
     ax_errorfig.legend()
 
-    #boxwhisker = plt.figure()
     ax_boxwhisker = errorfig.add_subplot(2, 1, 2)
     ax_boxwhisker.boxplot(error_test)
     errorfig.show()
 
-    #p = figure(y_axis_label='Loss', width=850, y_range=(0, 1), title='PyTorch results')
-    #p.extra_y_ranges = {'Accuracy': Range1d(start=0, end=100)}
-    #p.add_layout(LinearAxis(y_range_name='Accuracy', axis_label='Accuracy (%)'), 'right')
-    #p.line(np.arange(len(loss_list)), loss_list)
-    #p.line(np.arange(len(loss_list)), np.array(acc_list) * 100, y_range_name='Accuracy', color='red')
-    #show(p)
 
 
 def only_rain(ihyd_data):
@@ -334,34 +311,31 @@ def only_rain(ihyd_data):
     return ihyd_data
 
 
-train_encoder_only()
+#train_encoder_only()
 
 input_dim = 8 + len(attribs)
 encoder = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
-               num_layers=num_layers).double()
+               num_layers=num_layers, encoding_dim=encoding_dim).double()
 
-encoding_length = num_sigs
+encoding_length = encoding_dim
 decoder_input_dim = input_dim + encoding_length - 1  # -1 for flow
 decoder_hidden_dim = 25
 output_dim = 1
 output_layers = 2
-coupled_learning_rate = learning_rate * 10
+coupled_learning_rate = learning_rate
 output_epochs = 25
+outputs = None
 
 
-encoder.load_state_dict(torch.load(MODEL_STORE_PATH + 'lstm_net_model-retrain.ckpt'))
+encoder.load_state_dict(torch.load(MODEL_STORE_PATH + 'lstm_net_model-2outputlayer.ckpt'))
+encoder.output_encoding = True
 
 decoder = LSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size, output_dim=output_dim,
-               num_layers=output_layers).double()
-
-#for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
-    # print (signatures)
-    # for hyd_samples, signatures in test_loader:
-#    outputs = encoder(hyd_data.permute(2, 0, 1))
-#    predicted = outputs[:, -1, :]
+               num_layers=output_layers, encoding_dim=encoding_dim).double()
 
 # Loss and optimizer
-criterion = nn.SmoothL1Loss()
+#criterion = nn.SmoothL1Loss()
+criterion = nn.MSELoss()
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()),
                              lr=coupled_learning_rate, weight_decay=0.005)
 
@@ -376,8 +350,8 @@ for epoch in range(output_epochs):
 
         # Run the forward pass
         encoder.hidden = encoder.init_hidden()
-        temp = encoder(hyd_data) # b x t x o
-        encoding = temp[:, -1, :] # b x o
+        temp = encoder(hyd_data)  # b x t x o
+        encoding = temp[:, -1, :]  # b x o
 
         #print("Encoding " + str(encoding))
 
@@ -390,17 +364,17 @@ for epoch in range(output_epochs):
         encoding_unsqueezed = encoding_unsqueezed*encoding.unsqueeze(0)
         hyd_data = torch.cat((hyd_data, encoding_unsqueezed), 2) # t x b x i
 
-        if epoch == 0:
+        if epoch <= 1:
             hyd_data = only_rain(hyd_data)
 
-        flow = hyd_data[:, :, 0] # t x b
+        flow = hyd_data[:, :, 0]  # t x b
         hyd_data = hyd_data[:, :, 1:]
 
-        outputs = decoder(hyd_data) # b x t x 1
-        if torch.max(np.isnan(outputs.data))==1:
+        outputs = decoder(hyd_data)  # b x t x 1
+        if torch.max(np.isnan(outputs.data)) == 1:
             raise Exception('nan generated')
 
-        outputs = outputs.permute(1, 0, 2).squeeze() # t x b
+        outputs = outputs.permute(1, 0, 2).squeeze()  # t x b
 
         spinup = int(steps / 8)
         gt_flow_after_start = flow[spinup:, :]
@@ -417,33 +391,38 @@ for epoch in range(output_epochs):
         optimizer.step()
 
         # Track the accuracy
-        #signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
         error = np.mean((gt_flow_after_start - output_flow_after_start).detach().numpy())
 
         acc_list.append(error)
 
-        if (i + 1) % 5 == 0:
+        if (i + 1) % 50 == 0:
             print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                   .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
                           str(np.around(error, decimals=3))))
             fig = plt.figure()
-            ax_input = fig.add_subplot(3, 1, 1)
+            ax_input = fig.add_subplot(2, 1, 1)
             #ax_sigs = fig.add_subplot(3, 1, 2)
-            ax_loss = fig.add_subplot(3, 1, 3)
+            ax_loss = fig.add_subplot(2, 1, 2)
             fig.canvas.draw()
 
-            ax_input.plot(outputs[:, 0].detach().numpy()) #Batch 0
-            ax_input.plot(flow[:, 0].detach().numpy()) #Batch 0
+            l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
+            l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), label='GT flow')  #Batch 0
+            rain = -hyd_data[:, :, 2]
+            ax_rain = ax_input.twinx()
+            l_rain, = ax_rain.plot(rain[:, 0].detach().numpy(), color='b', label="Rain")  #Batch 0
+
+            ax_input.legend([l_model, l_gtflow, l_rain], ["Model", "GTFlow", "-Rain"], loc="upper right")
+
             ax_loss.plot(acc_list, color='r')
             ax_loss.plot(moving_average(acc_list), color='#AA0000')
             ax_loss.set_ylabel("error (red)")
 
-            #ax2 = ax1.twinx()
-            #ax2.plot(loss_list, color='b')
-            #ax2.plot(moving_average(loss_list), color='#0000AA')
-            #ax2.set_ylabel("loss (blue)")
+            ax2 = ax_loss.twinx()
+            ax2.plot(loss_list, color='b')
+            ax2.plot(moving_average(loss_list), color='#0000AA')
+            ax2.set_ylabel("loss (blue)")
 
             fig.show()
 
-torch.save(encoder.state_dict(), MODEL_STORE_PATH + 'encoder.ckpt')
-torch.save(decoder.state_dict(), MODEL_STORE_PATH + 'decoder.ckpt')
+    torch.save(encoder.state_dict(), MODEL_STORE_PATH + 'encoder.ckpt')
+    torch.save(decoder.state_dict(), MODEL_STORE_PATH + 'decoder.ckpt')
