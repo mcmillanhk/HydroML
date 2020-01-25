@@ -3,14 +3,14 @@ import os
 import torch
 import math
 import pandas as pd
-from skimage import io, transform
+#from skimage import io, transform
 import numpy as np
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, utils
-from pathlib import Path
-import datetime
-from multiprocessing import Pool
+#from torchvision import transforms, utils
+#from pathlib import Path
+#import datetime
+#from multiprocessing import Pool
 
 # Ignore warnings
 import warnings
@@ -18,10 +18,12 @@ warnings.filterwarnings("ignore")
 
 """Used https://pytorch.org/tutorials/beginner/data_loading_tutorial.html as example"""
 
+
 class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
-    def __init__(self, csv_file, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample, transform=None):
+    def __init__(self, csv_file, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample, transform,
+                 subsample_data):
         """
         Args:
             csv_file (string): Path to the csv file with signatures.
@@ -82,20 +84,20 @@ class CamelsDataset(Dataset):
         types_dict.update({col: float for col in col_names if col not in types_dict})
         area_data = pd.read_csv(area_file, sep=';', dtype=types_dict)
         area_data = pd.DataFrame(area_data[['gauge_id', 'area_gages2']])
-        area_data.set_index('gauge_id',inplace=True)
+        area_data.set_index('gauge_id', inplace=True)
         self.area_data = area_data
 
         """Check amount of flow data for each site and build a table of this"""
-        self.siteyears = pd.DataFrame(index = self.signatures_frame.iloc[:, 0],
-                                      columns = ['MinYear', 'MaxYear', 'NumYears', 'NumSamples', 'RunningTotal',
-                                                 'Flowmean_mmd','flow_std',
-                                                 "dayl_av", "prcp_av", "srad_av",
-                                                 "swe_av",
-                                                 "tmax_av", "tmin_av", "vp_av",
-                                                 "dayl_std", "prcp_std", "srad_std",
-                                                 "swe_std",
-                                                 "tmax_std", "tmin_std", "vp_std"])
-        for idx_site in range(int(self.num_sites/1)): #Load less sites
+        self.siteyears = pd.DataFrame(index=self.signatures_frame.iloc[:, 0],
+                                      columns=['MinYear', 'MaxYear', 'NumYears', 'NumSamples', 'RunningTotal',
+                                               'Flowmean_mmd', 'flow_std',
+                                               "dayl_av", "prcp_av", "srad_av",
+                                               "swe_av",
+                                               "tmax_av", "tmin_av", "vp_av",
+                                               "dayl_std", "prcp_std", "srad_std",
+                                               "swe_std",
+                                               "tmax_std", "tmin_std", "vp_std"])
+        for idx_site in range(int(self.num_sites/subsample_data)): #Load less sites
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
             flow_file = gauge_id + '_streamflow_qc.txt'
@@ -128,11 +130,11 @@ class CamelsDataset(Dataset):
                 maxyeartmp = minyeartmp
             maxyeartmp = min(maxyeartmp, maxgoodyear)
             numyearstmp = (maxyeartmp-minyeartmp+1)
-            numsamplestmp=0
-            try:
-                numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
-            except:
-                print("break")
+            #numsamplestmp=0
+            #try:
+            numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
+            #except: print("break")
+
             if idx_site == 0:
                 runningtotaltmp = numsamplestmp
             else:
@@ -194,8 +196,8 @@ class CamelsDataset(Dataset):
                                   (self.siteyears['Flowmean_mmd']-overall_mean)**2))**(1/2.0)
 
         self.flow_norm = pd.DataFrame(np.array([[overall_mean, overall_std]]),
-                                    index=['flow'],
-                                    columns=['mean', 'std'])
+                                      index=['flow'],
+                                      columns=['mean', 'std'])
 
         """Normalization of climate data"""
         dayl_overall_mean = np.nanmean(self.siteyears['dayl_av'])
@@ -220,17 +222,16 @@ class CamelsDataset(Dataset):
         vp_overall_std = (np.nanmean((self.siteyears['vp_std']) ** 2 +
                                    (self.siteyears['vp_av'] - vp_overall_mean) ** 2)) ** (1 / 2.0)
 
-
-        self.climate_norm = pd.DataFrame(np.array([[dayl_overall_mean,dayl_overall_std],
-                                   [prcp_overall_mean,prcp_overall_std],
-                                   [srad_overall_mean,srad_overall_std],
-                                   [swe_overall_mean, swe_overall_std],
-                                   [tmax_overall_mean, tmax_overall_std],
-                                   [tmin_overall_mean, tmin_overall_std],
-                                   [vp_overall_mean, vp_overall_std]]),
-                                    index=['dayl', 'prcp', 'srad',
-                                           'swe', 'tmax', 'tmin', 'vp'],
-                                    columns=['mean', 'std'])
+        self.climate_norm = pd.DataFrame(np.array([[dayl_overall_mean, dayl_overall_std],
+                                                   [prcp_overall_mean, prcp_overall_std],
+                                                   [srad_overall_mean, srad_overall_std],
+                                                   [swe_overall_mean, swe_overall_std],
+                                                   [tmax_overall_mean, tmax_overall_std],
+                                                   [tmin_overall_mean, tmin_overall_std],
+                                                   [vp_overall_mean, vp_overall_std]]),
+                                         index=['dayl', 'prcp', 'srad',
+                                                'swe', 'tmax', 'tmin', 'vp'],
+                                         columns=['mean', 'std'])
 
         self.num_samples = runningtotaltmp
 
@@ -292,7 +293,7 @@ class CamelsDataset(Dataset):
         flow_date_end = flow_date_start + pd.Timedelta('729 days')
 
         flow_data = flow_data.loc[(flow_data['date'] >= flow_date_start) &
-                                        (flow_data['date'] <= flow_date_end)]
+                                  (flow_data['date'] <= flow_date_end)]
         flow_data = flow_data.reset_index(drop=True)
 
         #  print("Extracted Flow Data")
@@ -306,7 +307,7 @@ class CamelsDataset(Dataset):
         climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H') - pd.Timedelta('12 hours')
         #  print("Extracted Climate Data")
 
-        climate_data = climate_data.loc[(climate_data['date'] >= flow_date_start) & \
+        climate_data = climate_data.loc[(climate_data['date'] >= flow_date_start) &
                                         (climate_data['date'] <= flow_date_end)]
         climate_data = climate_data.reset_index(drop=True)
 
@@ -339,7 +340,8 @@ class CamelsDataset(Dataset):
             flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0, 0])/self.flow_norm.iloc[0, 1])
 
         """Merge climate and flow into one array"""
-        hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date', 'swe(mm)'], axis=1)], axis=1, join='inner')
+        hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date', 'swe(mm)'], axis=1)],
+                             axis=1, join='inner')
 
         #print('Load ' + gauge_id)
         attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == int(gauge_id)]
@@ -387,4 +389,4 @@ class ToTensor(object):
         hyd_data_tensor.double()
         signatures_tensor = torch.from_numpy(signatures)
         signatures_tensor.double()
-        return [gauge_id, date_start, hyd_data_tensor,signatures_tensor]
+        return [gauge_id, date_start, hyd_data_tensor, signatures_tensor]

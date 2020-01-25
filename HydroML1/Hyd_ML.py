@@ -1,96 +1,76 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
-import torchvision.datasets
-from bokeh.plotting import figure
-from bokeh.io import show
-from bokeh.models import LinearAxis, Range1d
 import numpy as np
 import CAMELS_data as Cd
 import os
 import math
 import matplotlib.pyplot as plt
-import time
-# Hyperparameters
-modeltype = 'LSTM'  # 'Conv'
-num_epochs = 2
-#num_classes = 10
-batch_size = 20
-learning_rate = 0.00001 # 0.001 works well for the subset. So does .0001
-years_per_sample = 2
-hidden_dim = 100
-num_sigs = 13
-num_layers = 2
-encoding_dim = 25
-
-"""
-DATA_PATH = 'C:\\Users\Andy\PycharmProjects\MNISTData'
-"""
-MODEL_STORE_PATH = 'D:\\Hil_ML\\pytorch_models\\'
 
 
-root_dir_flow = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'usgs_streamflow')
-root_dir_climate = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'basin_mean_forcing', 'daymet')
-root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
-csv_file_train = os.path.join(root_dir_signatures, 'camels_hydro_train.txt')
-csv_file_test = os.path.join(root_dir_signatures, 'camels_hydro_test.txt')
+def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
 
-csv_file_attrib = [os.path.join(root_dir_signatures, 'camels_' + s + '.txt') for s in ['soil', 'topo', 'vege', 'geol']]
-attribs = {'carbonate_rocks_frac': 1.0, # Numbers, not categories, from geol.
-           'geol_porostiy': 1.0,
-           'geol_permeability': 0.1,
-           'soil_depth_pelletier': 0.1, #everything from soil
-           'soil_depth_statsgo': 1,
-           'soil_porosity': 1,
-           'soil_conductivity': 1,
-           'max_water_content': 1,
-           'sand_frac': 0.01, #These are percentages
-           'silt_frac': 0.01,
-           'clay_frac': 0.01,
-           'water_frac': 0.01,
-           'organic_frac': 0.01,
-           'other_frac': 0.01,
-           'elev_mean': 0.001, #topo: not lat/long
-           'slope_mean': 0.01,
-           'area_gages2': 0.001, #only the reliable of the 2 areas
-           'gvf_max': 1, #leaf area index seems totally correlated with these
-           'gvf_diff': 1,
-           }
+    root_dir_flow = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'usgs_streamflow')
+    root_dir_climate = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'basin_mean_forcing', 'daymet')
+    root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
+    csv_file_train = os.path.join(root_dir_signatures, 'camels_hydro_train.txt')
+    csv_file_test = os.path.join(root_dir_signatures, 'camels_hydro_test.txt')
 
-# transforms to apply to the data
-#  trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
+    csv_file_attrib = [os.path.join(root_dir_signatures, 'camels_' + s + '.txt') for s in
+                       ['soil', 'topo', 'vege', 'geol']]
+    attribs = {'carbonate_rocks_frac': 1.0,  # Numbers, not categories, from geol.
+               'geol_porostiy': 1.0,
+               'geol_permeability': 0.1,
+               'soil_depth_pelletier': 0.1,  # everything from soil
+               'soil_depth_statsgo': 1,
+               'soil_porosity': 1,
+               'soil_conductivity': 1,
+               'max_water_content': 1,
+               'sand_frac': 0.01,  # These are percentages
+               'silt_frac': 0.01,
+               'clay_frac': 0.01,
+               'water_frac': 0.01,
+               'organic_frac': 0.01,
+               'other_frac': 0.01,
+               'elev_mean': 0.001,  # topo: not lat/long
+               'slope_mean': 0.01,
+               'area_gages2': 0.001,  # only the reliable of the 2 areas
+               'gvf_max': 1,  # leaf area index seems totally correlated with these
+               'gvf_diff': 1,
+               }
 
-"""# MNIST dataset
-train_dataset = torchvision.datasets.MNIST(root=DATA_PATH, train=True, transform=trans, download=True)
-test_dataset = torchvision.datasets.MNIST(root=DATA_PATH, train=False, transform=trans)"""
-# Camels Dataset
-train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample,
-                                 transform=Cd.ToTensor())
-test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample,
-                            transform=Cd.ToTensor())
+    # Camels Dataset
+    train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_flow, csv_file_attrib, attribs,
+                                     years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data)
+    test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, csv_file_attrib, attribs,
+                                    years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data)
+    validate_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, csv_file_attrib, attribs,
+                                        years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data)
 
-# Data loader
-#if __name__ == '__main__':
-train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
-#else:
-#    exit(1)
-#print("Making training smaller for testing...")
-#train_loader = test_loader
-def moving_average(a, n=13) :
+    # Data loader
+    #if __name__ == '__main__':
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    validate_loader = DataLoader(dataset=validate_dataset, batch_size=1, shuffle=False)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
+
+    input_dim = 8 + len(attribs)
+    return train_loader, validate_loader, test_loader, input_dim
+
+
+def moving_average(a, n=13):
     ret = np.cumsum(a, dtype=float)
     ret[n:] = ret[n:] - ret[:-n]
     return ret[n - 1:] / n
 
+
 # Convolutional neural network (two convolutional layers)
 class ConvNet(nn.Module):
-    def __init__(self):
+    def __init__(self, num_sigs, years_per_sample):
         super(ConvNet, self).__init__()
         self.layer1 = nn.Sequential(
             nn.Conv1d(8, 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
-            nn.ReLU())  # ,
-            # nn.MaxPool1d(kernel_size=5, stride=5))
+            nn.ReLU())
+        #   , nn.MaxPool1d(kernel_size=5, stride=5))
         self.layer2 = nn.Sequential(
             nn.Conv1d(32, 32, kernel_size=11, stride=2, padding=5),
             nn.ReLU(),
@@ -113,7 +93,6 @@ class ConvNet(nn.Module):
         out = self.fc2(out)
         return out
 
-#@profile
 
 class LSTM(nn.Module):
 
@@ -139,16 +118,16 @@ class LSTM(nn.Module):
         return (torch.zeros(self.num_layers, self.batch_size, self.hidden_dim),
                 torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
 
-    def forward(self, input):
+    def forward(self, hyd_input):
         # Forward pass through LSTM layer
         # shape of lstm_out: [input_size, batch_size, hidden_dim]
         # shape of self.hidden: (a, b), where a and b both
         # have shape (num_layers, batch_size, hidden_dim).
         #actual_batch_size = min(self.batch_size, input.shape[1])
-        actual_batch_size = input.shape[1]
+        #actual_batch_size = input.shape[1]
         #print("actual_batch_size=", actual_batch_size, "len(input)=", len(input))
         #unneeded reshape? lstm_out, self.hidden = self.lstm(input.view(len(input), actual_batch_size, -1))
-        lstm_out, self.hidden = self.lstm(input)
+        lstm_out, _ = self.lstm(hyd_input)  # second output is hidden
 
         # Only take the output from the final timetep
         # Can pass on the entirety of lstm_out to the next layer if it is a seq2seq prediction
@@ -163,14 +142,23 @@ class LSTM(nn.Module):
         return y_pred
 
 
-def train_encoder_only():
+def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_path, num_layers, encoding_dim,
+                       hidden_dim, batch_size, num_sigs):
+    # Hyperparameters
+    modeltype = 'LSTM'  # 'Conv'
+    num_epochs = 2
+    learning_rate = 0.00001  # 0.001 works well for the subset. So does .0001
+
     shown = False
 
-    input_dim = 8 + len(attribs)
+    #input_dim = 8 + len(attribs)
     if modeltype == 'Conv':
-        model = ConvNet()
+        model = ConvNet(num_sigs=num_sigs, years_per_sample=2)
     elif modeltype == 'LSTM':
-        model = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs, num_layers=num_layers, encoding_dim=encoding_dim)
+        model = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
+                     num_layers=num_layers, encoding_dim=encoding_dim)
+    else:
+        raise Exception("Unhandled network structure")
 
     model = model.double()
 
@@ -185,22 +173,19 @@ def train_encoder_only():
     acc_list = []
     for epoch in range(num_epochs):
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
-            # print("epoch = ", epoch, "i = ", i)
-            #if i == 100:
-            #   exit()
             # Run the forward pass
             if modeltype == 'LSTM':
                 model.hidden = model.init_hidden()
-                hyd_data=hyd_data.permute(2, 0, 1) # b x i x t -> t x b x i
+                hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
 
             if epoch == 0:
                 hyd_data = only_rain(hyd_data)
 
             outputs = model(hyd_data)
-            if (torch.max(np.isnan(outputs.data))==1):
+            if torch.max(np.isnan(outputs.data)) == 1:
                 print('nan generated')
             signatures = np.squeeze(signatures)
-            if num_sigs==1:
+            if num_sigs == 1:
                 loss = criterion(outputs[:, 0], signatures[:, 0])
             else:
                 signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
@@ -220,14 +205,15 @@ def train_encoder_only():
             #total = signatures.size(0)
             _, predicted = torch.max(outputs.data, 1)
             signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-            error = np.mean((np.abs(outputs.data - signatures_ref)/(0.5*(np.abs(signatures_ref) + np.abs(outputs.data)) + 1e-8)).numpy())
+            error = np.mean((np.abs(outputs.data - signatures_ref)
+                             / (0.5*(np.abs(signatures_ref) + np.abs(outputs.data)) + 1e-8)).numpy())
 
             acc_list.append(error)
 
             if (i + 1) % 50 == 0:
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                              str(np.around(error,decimals=3))))
+                              str(np.around(error, decimals=3))))
                 num2plot = 5  # num_sigs
                 fig = plt.figure()
                 ax_input = fig.add_subplot(3, 1, 1)
@@ -235,11 +221,12 @@ def train_encoder_only():
                 ax1 = fig.add_subplot(3, 1, 3)
                 fig.canvas.draw()
 
-                ax_input.plot(hyd_data[:, 0, :].numpy()) #Batch 0
+                ax_input.plot(hyd_data[:, 0, :].numpy())  #Batch 0
                 colors = plt.cm.jet(np.linspace(0, 1, num2plot))
-                for j in range(num2plot): # range(num_sigs):
+                for j in range(num2plot):  # range(num_sigs):
                     ax_sigs.plot(outputs.data[0, :, j].numpy(), color=colors[j, :])  #Batch 0
-                    ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(outputs.shape[1], num_sigs).numpy(), color=colors[j, :])  #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
+                    ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(outputs.shape[1], num_sigs).numpy(),
+                                 color=colors[j, :])  #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
                 ax1.plot(acc_list, color='r')
                 ax1.plot(moving_average(acc_list), color='#AA0000')
                 ax1.set_ylabel("error (red)")
@@ -271,7 +258,7 @@ def train_encoder_only():
             predicted = outputs[:, -1, :]
 
             error = predicted.squeeze() - signatures.squeeze()
-            error_bl = signatures # relative to predicting 0 for everything
+            error_bl = signatures  # relative to predicting 0 for everything
             if error_test is None:
                 error_test = error
                 error_baseline = error_bl
@@ -287,7 +274,7 @@ def train_encoder_only():
 
     #np.linalg.norm(error_test, axis=0)
     # Save the model and plot
-    torch.save(model.state_dict(), MODEL_STORE_PATH + 'lstm_net_model-2outputlayer.ckpt')
+    torch.save(model.state_dict(), pretrained_encoder_path)
 
     errorfig = plt.figure()
     ax_errorfig = errorfig.add_subplot(2, 1, 1)
@@ -301,7 +288,6 @@ def train_encoder_only():
     errorfig.show()
 
 
-
 def only_rain(ihyd_data):
     iflow = ihyd_data[:, :, 0].clone()
     rain = ihyd_data[:, :, 3].clone()
@@ -311,118 +297,150 @@ def only_rain(ihyd_data):
     return ihyd_data
 
 
-#train_encoder_only()
-
-input_dim = 8 + len(attribs)
-encoder = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
-               num_layers=num_layers, encoding_dim=encoding_dim).double()
-
-encoding_length = encoding_dim
-decoder_input_dim = input_dim + encoding_length - 1  # -1 for flow
-decoder_hidden_dim = 25
-output_dim = 1
-output_layers = 2
-coupled_learning_rate = learning_rate
-output_epochs = 25
-outputs = None
+def validate(dataloader, encoder, decoder):
+    return
 
 
-encoder.load_state_dict(torch.load(MODEL_STORE_PATH + 'lstm_net_model-2outputlayer.ckpt'))
-encoder.output_encoding = True
+def setup_encoder_decoder(input_dim, pretrained_encoder_path, encoder_layers, encoding_dim,
+                          hidden_dim, batch_size, num_sigs):
+    encoder = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
+                   num_layers=encoder_layers, encoding_dim=encoding_dim).double()
 
-decoder = LSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size, output_dim=output_dim,
-               num_layers=output_layers, encoding_dim=encoding_dim).double()
+    decoder_input_dim = input_dim + encoding_dim - 1  # -1 for flow
+    decoder_hidden_dim = 25
+    output_dim = 1
+    output_layers = 2
 
-# Loss and optimizer
-#criterion = nn.SmoothL1Loss()
-criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()),
-                             lr=coupled_learning_rate, weight_decay=0.005)
+    encoder.load_state_dict(torch.load(pretrained_encoder_path))
+    encoder.output_encoding = True
 
-# Train the model
-total_step = len(train_loader)
-loss_list = []
-acc_list = []
-for epoch in range(output_epochs):
-    for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+    decoder = LSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size,
+                   output_dim=output_dim, num_layers=output_layers, encoding_dim=encoding_dim).double()
 
-        hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
+    return encoder, decoder
 
-        # Run the forward pass
-        encoder.hidden = encoder.init_hidden()
-        temp = encoder(hyd_data)  # b x t x o
-        encoding = temp[:, -1, :]  # b x o
 
-        #print("Encoding " + str(encoding))
+#Expect encoder is pretrained, decoder is not
+def train_encoder_decoder(train_loader, encoder, decoder, model_store_path):
+    coupled_learning_rate = 0.00001
+    output_epochs = 25
 
-        decoder.hidden = decoder.init_hidden()
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()),
+                                 lr=coupled_learning_rate, weight_decay=0.005)
 
-        steps = hyd_data.shape[0]
-        actual_batch_size = hyd_data.shape[1]
+    total_step = len(train_loader)
+    loss_list = []
+    acc_list = []
+    validate_loss_list = []
+    #outputs = None
+    for epoch in range(output_epochs):
+        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
 
-        encoding_unsqueezed = torch.from_numpy(np.ones((steps, actual_batch_size, encoding.size(1))))
-        encoding_unsqueezed = encoding_unsqueezed*encoding.unsqueeze(0)
-        hyd_data = torch.cat((hyd_data, encoding_unsqueezed), 2) # t x b x i
+            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, epoch == 0)
 
-        if epoch <= 1:
-            hyd_data = only_rain(hyd_data)
+            steps = hyd_data.shape[2]  # b x i x t
 
-        flow = hyd_data[:, :, 0]  # t x b
-        hyd_data = hyd_data[:, :, 1:]
+            spinup = int(steps / 8)
+            gt_flow_after_start = flow[spinup:, :]
+            output_flow_after_start = outputs[spinup:, :]
+            loss = criterion(output_flow_after_start.squeeze(), gt_flow_after_start)
+            if torch.isnan(loss):
+                raise Exception('loss is nan')
 
-        outputs = decoder(hyd_data)  # b x t x 1
-        if torch.max(np.isnan(outputs.data)) == 1:
-            raise Exception('nan generated')
+            loss_list.append(loss.item())
 
-        outputs = outputs.permute(1, 0, 2).squeeze()  # t x b
+            # Backprop and perform Adam optimisation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        spinup = int(steps / 8)
-        gt_flow_after_start = flow[spinup:, :]
-        output_flow_after_start = outputs[spinup:, :]
-        loss = criterion(output_flow_after_start.squeeze(), gt_flow_after_start)
-        if torch.isnan(loss):
-            raise Exception('loss is nan')
+            # Track the accuracy
+            error = np.mean((gt_flow_after_start - output_flow_after_start).detach().numpy())
 
-        loss_list.append(loss.item())
+            acc_list.append(error)
 
-        # Backprop and perform Adam optimisation
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            if (i + 1) % 50 == 0:
+                print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
+                      .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
+                              str(np.around(error, decimals=3))))
+                fig = plt.figure()
+                ax_input = fig.add_subplot(2, 1, 1)
+                #ax_sigs = fig.add_subplot(3, 1, 2)
+                ax_loss = fig.add_subplot(2, 1, 2)
+                fig.canvas.draw()
 
-        # Track the accuracy
-        error = np.mean((gt_flow_after_start - output_flow_after_start).detach().numpy())
+                l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
+                l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), label='GT flow')  #Batch 0
+                rain = -hyd_data[0, 2, :]
+                ax_rain = ax_input.twinx()
+                l_rain, = ax_rain.plot(rain.detach().numpy(), color='b', label="Rain")  #Batch 0
 
-        acc_list.append(error)
+                ax_input.legend([l_model, l_gtflow, l_rain], ["Model", "GTFlow", "-Rain"], loc="upper right")
 
-        if (i + 1) % 50 == 0:
-            print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
-                  .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
-                          str(np.around(error, decimals=3))))
-            fig = plt.figure()
-            ax_input = fig.add_subplot(2, 1, 1)
-            #ax_sigs = fig.add_subplot(3, 1, 2)
-            ax_loss = fig.add_subplot(2, 1, 2)
-            fig.canvas.draw()
+                ax_loss.plot(acc_list, color='r')
+                ax_loss.plot(moving_average(acc_list), color='#AA0000')
+                ax_loss.set_ylabel("error (red)")
 
-            l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
-            l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), label='GT flow')  #Batch 0
-            rain = -hyd_data[:, :, 2]
-            ax_rain = ax_input.twinx()
-            l_rain, = ax_rain.plot(rain[:, 0].detach().numpy(), color='b', label="Rain")  #Batch 0
+                ax2 = ax_loss.twinx()
+                ax2.plot(loss_list, color='b')
+                ax2.plot(moving_average(loss_list), color='#0000AA')
+                ax2.set_ylabel("loss (blue)")
 
-            ax_input.legend([l_model, l_gtflow, l_rain], ["Model", "GTFlow", "-Rain"], loc="upper right")
+                fig.show()
 
-            ax_loss.plot(acc_list, color='r')
-            ax_loss.plot(moving_average(acc_list), color='#AA0000')
-            ax_loss.set_ylabel("error (red)")
+        torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
+        torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
 
-            ax2 = ax_loss.twinx()
-            ax2.plot(loss_list, color='b')
-            ax2.plot(moving_average(loss_list), color='#0000AA')
-            ax2.set_ylabel("loss (blue)")
 
-            fig.show()
+def run_encoder_decoder(decoder, encoder, hyd_data, restricted_input):
+    hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
+    # Run the forward pass
+    encoder.hidden = encoder.init_hidden()
+    temp = encoder(hyd_data)  # b x t x o
+    encoding = temp[:, -1, :]  # b x o
+    # print("Encoding " + str(encoding))
+    decoder.hidden = decoder.init_hidden()
+    steps = hyd_data.shape[0]
+    actual_batch_size = hyd_data.shape[1]
+    encoding_unsqueezed = torch.from_numpy(np.ones((steps, actual_batch_size, encoding.size(1))))
+    encoding_unsqueezed = encoding_unsqueezed * encoding.unsqueeze(0)
+    hyd_data = torch.cat((hyd_data, encoding_unsqueezed), 2)  # t x b x i
+    if restricted_input:
+        hyd_data = only_rain(hyd_data)
+    flow = hyd_data[:, :, 0]  # t x b
+    hyd_data = hyd_data[:, :, 1:]
+    outputs = decoder(hyd_data)  # b x t x 1
+    if torch.max(np.isnan(outputs.data)) == 1:
+        raise Exception('nan generated')
+    outputs = outputs.permute(1, 0, 2).squeeze()  # t x b
+    return flow, outputs
 
-    torch.save(encoder.state_dict(), MODEL_STORE_PATH + 'encoder.ckpt')
-    torch.save(decoder.state_dict(), MODEL_STORE_PATH + 'decoder.ckpt')
+
+def train_test_everything():
+    batch_size = 20
+
+    train_loader, validate_loader, test_loader, input_dim = load_inputs(subsample_data=50, years_per_sample=2,
+                                                                        batch_size=batch_size)
+    #TODO input_dim should come from the loaders
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\temp\\'
+
+    encoding_num_layers = 2
+    encoding_dim = 25
+    encoding_hidden_dim = 100
+    num_sigs = train_loader.dataset.signatures_frame.shape[1] - 1
+
+    pretrained_encoder_path = model_store_path + 'lstm_net_model-2outputlayer.ckpt'
+    train_encoder_only(train_loader, test_loader=validate_loader, input_dim=input_dim, pretrained_encoder_path=pretrained_encoder_path,
+                       num_layers=encoding_num_layers, encoding_dim=encoding_dim, hidden_dim=encoding_hidden_dim,
+                       num_sigs=num_sigs, batch_size=batch_size)
+
+    encoder, decoder = setup_encoder_decoder(input_dim, pretrained_encoder_path=pretrained_encoder_path,
+                                             encoder_layers=encoding_num_layers, encoding_dim=encoding_dim,
+                                             hidden_dim=encoding_hidden_dim, num_sigs=num_sigs,
+                                             batch_size=batch_size)
+
+    train_encoder_decoder(train_loader, encoder, decoder, model_store_path=model_store_path)
+
+
+train_test_everything()
