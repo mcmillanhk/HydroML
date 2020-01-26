@@ -322,13 +322,13 @@ class CamelsDataset(Dataset):
 
         if self.normalize_inputs:
             climate_data["prcp(mm / day)"] = ((climate_data["prcp(mm / day)"])/
-                                              self.climate_norm.loc["prcp","std"])
-            climate_data["swe(mm)"] = ((climate_data["swe(mm)"] - self.climate_norm.loc["swe","mean"])/
-                                       self.climate_norm.loc["swe","std"])
-            climate_data["tmax(C)"] = ((climate_data["tmax(C)"] - self.climate_norm.loc["tmax","mean"])/
-                                       self.climate_norm.loc["tmax","std"])
-            climate_data["tmin(C)"] = ((climate_data["tmin(C)"] - self.climate_norm.loc["tmin","mean"])/
-                                       self.climate_norm.loc["tmin","std"])
+                                              self.climate_norm.loc["prcp", "std"])
+            climate_data["swe(mm)"] = ((climate_data["swe(mm)"] - self.climate_norm.loc["swe","mean"]) /
+                                       self.climate_norm.loc["swe", "std"])
+            climate_data["tmax(C)"] = ((climate_data["tmax(C)"] - self.climate_norm.loc["tmax","mean"]) /
+                                       self.climate_norm.loc["tmax", "std"])
+            climate_data["tmin(C)"] = ((climate_data["tmin(C)"] - self.climate_norm.loc["tmin","mean"]) /
+                                       self.climate_norm.loc["tmin", "std"])
 
         """Normalize flow data"""
         """First to mm/d"""
@@ -362,7 +362,6 @@ class CamelsDataset(Dataset):
         #hyd_data is t x i
         sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start),
                   'hyd_data': hyd_data, 'signatures': signatures}
-
 
         if self.transform:
             sample = self.transform(sample)

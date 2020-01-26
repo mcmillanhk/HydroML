@@ -6,6 +6,13 @@ import CAMELS_data as Cd
 import os
 import math
 import matplotlib.pyplot as plt
+from enum import Enum
+
+
+class ModelType(Enum):
+    LSTM = 0
+    ConvNet = 1
+    HydModel = 2
 
 
 def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
@@ -94,11 +101,88 @@ class ConvNet(nn.Module):
         return out
 
 
-class LSTM(nn.Module):
+class HydModelNet(nn.Module):
+
+    def __init__(self, input_dim, hidden_dim, store_dim,
+                 num_layers):
+        super(HydModelNet, self).__init__()
+
+        self.inflow = self.make_inflow_net(num_layers, input_dim, hidden_dim, store_dim+1)
+        self.outflow = self.make_outflow_net(num_layers, input_dim, hidden_dim, store_dim)
+        self.store_dim = store_dim
+        self.dropout = 0.5
+        self.stores = torch.zeros([store_dim])
+
+    @staticmethod
+    def make_inflow_net(num_layers, input_dim, hidden_dim, output_dim):
+        layers = []
+        for i in range(num_layers):
+            this_input_dim = input_dim if i == 0 else hidden_dim
+            this_output_dim = hidden_dim if i < num_layers-1 else output_dim
+            layers.append(nn.Linear(this_input_dim, this_output_dim))
+            layers.append(nn.ReLU())
+        return nn.Sequential(*layers)
+
+    @staticmethod
+    def make_outflow_net(num_layers, input_dim, hidden_dim, output_dim):
+        layers = []
+        for i in range(num_layers):
+            this_input_dim = input_dim if i == 0 else hidden_dim
+            this_output_dim = hidden_dim if i < num_layers-1 else output_dim
+            layers.append(nn.Linear(this_input_dim, this_output_dim))
+            layers.append(nn.Sigmoid())  # output in 0..1
+        return nn.Sequential(*layers)
+
+    def init_stores(self, batch_size):
+        self.stores = torch.zeros([batch_size, self.store_dim]).double()
+        self.stores[:, 0] = 1000
+        self.stores[:, 1] = 100  # Start with some non-empty stores (deep, snow)
+
+    #def init_hidden(self):
+        # This is what we'll initialise our hidden state as
+        #return (torch.zeros(self.num_layers, self.batch_size, self.hidden_dim),
+        #        torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
+
+    def forward(self, hyd_input):  # hyd_input is t x b x i
+        rain = hyd_input[:, :, 2]  # rain is t x b
+        steps = hyd_input.shape[0]
+        batch_size = hyd_input.shape[1]
+        flows = torch.zeros([steps, batch_size]).double()
+
+        self.init_stores(batch_size)
+
+        for i in range(steps):
+            a = self.inflow(hyd_input[i, :, :])
+            a = nn.Softmax()(a)  # a is b x stores
+            if a.min() < 0 or a.max() > 1:
+                raise Exception("Relative inflow flux outside [0,1]\n" + str(a))
+
+            rain_distn = a[:, 1:] * rain[i, :].unsqueeze(1)  # (b x stores) . (b x 1)
+            self.stores += rain_distn
+            b = self.outflow(hyd_input[i, :, :])
+
+            if b.min() < 0 or b.max() > 1:
+                raise Exception("Relative outflow flux outside [0,1]\n" + str(b))
+
+            flow_distn = b * self.stores
+            self.stores -= flow_distn
+
+            if self.stores.min() < 0:
+                raise Exception("Negative store\n" + str(self.stores))
+
+            flows[i, :] = flow_distn.sum(1)
+
+        if flows.min() < 0:
+            raise Exception("Negative flow")
+
+        return flows
+
+
+class SimpleLSTM(nn.Module):
 
     def __init__(self, input_dim, hidden_dim, batch_size, output_dim,
                  num_layers, encoding_dim):
-        super(LSTM, self).__init__()
+        super(SimpleLSTM, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.batch_size = batch_size
@@ -155,8 +239,8 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
     if modeltype == 'Conv':
         model = ConvNet(num_sigs=num_sigs, years_per_sample=2)
     elif modeltype == 'LSTM':
-        model = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
-                     num_layers=num_layers, encoding_dim=encoding_dim)
+        model = SimpleLSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
+                           num_layers=num_layers, encoding_dim=encoding_dim)
     else:
         raise Exception("Unhandled network structure")
 
@@ -183,7 +267,7 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
 
             outputs = model(hyd_data)
             if torch.max(np.isnan(outputs.data)) == 1:
-                print('nan generated')
+                raise Exception('nan generated')
             signatures = np.squeeze(signatures)
             if num_sigs == 1:
                 loss = criterion(outputs[:, 0], signatures[:, 0])
@@ -193,7 +277,8 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
                 #final value only
                 #loss = criterion(outputs[:, -1, :], signatures_ref[:, 0, :])
             if torch.isnan(loss):
-                print('loss is nan')
+                raise Exception('loss is nan')
+
             loss_list.append(loss.item())
 
             # Backprop and perform Adam optimisation
@@ -302,9 +387,9 @@ def validate(dataloader, encoder, decoder):
 
 
 def setup_encoder_decoder(input_dim, pretrained_encoder_path, encoder_layers, encoding_dim,
-                          hidden_dim, batch_size, num_sigs):
-    encoder = LSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
-                   num_layers=encoder_layers, encoding_dim=encoding_dim).double()
+                          hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim):
+    encoder = SimpleLSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
+                         num_layers=encoder_layers, encoding_dim=encoding_dim).double()
 
     decoder_input_dim = input_dim + encoding_dim - 1  # -1 for flow
     decoder_hidden_dim = 25
@@ -314,14 +399,19 @@ def setup_encoder_decoder(input_dim, pretrained_encoder_path, encoder_layers, en
     encoder.load_state_dict(torch.load(pretrained_encoder_path))
     encoder.output_encoding = True
 
-    decoder = LSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size,
-                   output_dim=output_dim, num_layers=output_layers, encoding_dim=encoding_dim).double()
+    decoder = None
+    if decoder_model_type == ModelType.LSTM:
+        decoder = SimpleLSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size,
+                             output_dim=output_dim, num_layers=output_layers, encoding_dim=encoding_dim).double()
+    else:
+        decoder = HydModelNet(decoder_input_dim, decoder_hidden_dim, store_dim, output_layers)
+    decoder = decoder.double()
 
     return encoder, decoder
 
 
 #Expect encoder is pretrained, decoder is not
-def train_encoder_decoder(train_loader, encoder, decoder, model_store_path):
+def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, model_store_path, model):
     coupled_learning_rate = 0.00001
     output_epochs = 25
 
@@ -335,28 +425,19 @@ def train_encoder_decoder(train_loader, encoder, decoder, model_store_path):
     validate_loss_list = []
     #outputs = None
     for epoch in range(output_epochs):
+        restricted_input = False
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
 
-            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, epoch == 0)
+            restricted_input = epoch == 0
+            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, restricted_input, model)
 
-            steps = hyd_data.shape[2]  # b x i x t
-
-            spinup = int(steps / 8)
-            gt_flow_after_start = flow[spinup:, :]
-            output_flow_after_start = outputs[spinup:, :]
-            loss = criterion(output_flow_after_start.squeeze(), gt_flow_after_start)
-            if torch.isnan(loss):
-                raise Exception('loss is nan')
-
+            error, loss = compute_loss(criterion, flow, hyd_data, outputs)
             loss_list.append(loss.item())
 
             # Backprop and perform Adam optimisation
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-
-            # Track the accuracy
-            error = np.mean((gt_flow_after_start - output_flow_after_start).detach().numpy())
 
             acc_list.append(error)
 
@@ -366,13 +447,12 @@ def train_encoder_decoder(train_loader, encoder, decoder, model_store_path):
                               str(np.around(error, decimals=3))))
                 fig = plt.figure()
                 ax_input = fig.add_subplot(2, 1, 1)
-                #ax_sigs = fig.add_subplot(3, 1, 2)
                 ax_loss = fig.add_subplot(2, 1, 2)
                 fig.canvas.draw()
 
                 l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
                 l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), label='GT flow')  #Batch 0
-                rain = -hyd_data[0, 2, :]
+                rain = -hyd_data[0, 3, :]  # b x i x t
                 ax_rain = ax_input.twinx()
                 l_rain, = ax_rain.plot(rain.detach().numpy(), color='b', label="Rain")  #Batch 0
 
@@ -385,15 +465,71 @@ def train_encoder_decoder(train_loader, encoder, decoder, model_store_path):
                 ax2 = ax_loss.twinx()
                 ax2.plot(loss_list, color='b')
                 ax2.plot(moving_average(loss_list), color='#0000AA')
-                ax2.set_ylabel("loss (blue)")
+                ax2.set_ylabel("Train/val. loss (blue/green)")
+                if len(validate_loss_list) > 0:
+                    ax2.plot(validate_loss_list, color='g')
+                    ax2.plot(moving_average(validate_loss_list), color='#00AA00')
+                    #ax2.set_ylabel("Val. loss (green)")
 
                 fig.show()
+
+        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(validate_loader):
+            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, restricted_input, model)
+            _, loss = compute_loss(criterion, flow, hyd_data, outputs)
+            validate_loss_list.append(loss)
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
 
 
-def run_encoder_decoder(decoder, encoder, hyd_data, restricted_input):
+def compute_loss(criterion, flow, hyd_data, outputs):
+    steps = hyd_data.shape[2]  # b x i x t
+    spinup = int(steps / 8)
+    gt_flow_after_start = flow[spinup:, :]
+    if len(outputs.shape) == 1:
+        outputs = outputs.unsqueeze(1)
+
+    output_flow_after_start = outputs[spinup:, :]
+    loss = criterion(output_flow_after_start.squeeze(), gt_flow_after_start)
+    if torch.isnan(loss):
+        raise Exception('loss is nan')
+    # Track the accuracy
+    error = np.sqrt(np.mean((gt_flow_after_start - output_flow_after_start).detach().numpy() ** 2))
+    return error, loss
+
+
+def run_encoder_decoder(decoder, encoder, hyd_data, restricted_input, model):
+    if model == ModelType.LSTM:
+        flow, outputs = run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input)
+    else:
+        flow, outputs = run_encoder_decoder_hydmodel(decoder, encoder, hyd_data)
+    return flow, outputs
+
+
+def run_encoder_decoder_hydmodel(decoder, encoder, hyd_data):
+    hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
+    # Run the forward pass
+    encoder.hidden = encoder.init_hidden()
+    temp = encoder(hyd_data)  # b x t x o
+    encoding = temp[:, -1, :]  # b x o
+    # print("Encoding " + str(encoding))
+    #decoder.init_stores()
+    steps = hyd_data.shape[0]
+    actual_batch_size = hyd_data.shape[1]
+    encoding_unsqueezed = torch.from_numpy(np.ones((steps, actual_batch_size, encoding.size(1))))
+    encoding_unsqueezed = encoding_unsqueezed * encoding.unsqueeze(0)
+    hyd_data = torch.cat((hyd_data, encoding_unsqueezed), 2)  # t x b x i
+    #if restricted_input:
+    #    hyd_data = only_rain(hyd_data)
+    flow = hyd_data[:, :, 0]  # t x b
+    hyd_data = hyd_data[:, :, 1:]
+    outputs = decoder(hyd_data)  # b x t
+    if torch.max(np.isnan(outputs.data)) == 1:
+        raise Exception('nan generated')
+    return flow, outputs
+
+
+def run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input):
     hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
     # Run the forward pass
     encoder.hidden = encoder.init_hidden()
@@ -428,19 +564,27 @@ def train_test_everything():
     encoding_num_layers = 2
     encoding_dim = 25
     encoding_hidden_dim = 100
+    store_dim = 4  # 4 is probably the minimum: snow, deep, shallow, runoff
     num_sigs = train_loader.dataset.signatures_frame.shape[1] - 1
 
+    decoder_model_type = ModelType.HydModel
+
     pretrained_encoder_path = model_store_path + 'lstm_net_model-2outputlayer.ckpt'
-    train_encoder_only(train_loader, test_loader=validate_loader, input_dim=input_dim, pretrained_encoder_path=pretrained_encoder_path,
-                       num_layers=encoding_num_layers, encoding_dim=encoding_dim, hidden_dim=encoding_hidden_dim,
-                       num_sigs=num_sigs, batch_size=batch_size)
+    if False:
+        train_encoder_only(train_loader, test_loader=validate_loader, input_dim=input_dim,
+                           pretrained_encoder_path=pretrained_encoder_path,
+                           num_layers=encoding_num_layers, encoding_dim=encoding_dim,
+                           hidden_dim=encoding_hidden_dim,
+                           num_sigs=num_sigs, batch_size=batch_size)
 
     encoder, decoder = setup_encoder_decoder(input_dim, pretrained_encoder_path=pretrained_encoder_path,
                                              encoder_layers=encoding_num_layers, encoding_dim=encoding_dim,
                                              hidden_dim=encoding_hidden_dim, num_sigs=num_sigs,
-                                             batch_size=batch_size)
+                                             batch_size=batch_size, decoder_model_type=decoder_model_type,
+                                             store_dim=store_dim)
 
-    train_encoder_decoder(train_loader, encoder, decoder, model_store_path=model_store_path)
+    train_encoder_decoder(train_loader, validate_loader, encoder, decoder, model_store_path=model_store_path,
+                          model=decoder_model_type)
 
 
 train_test_everything()
