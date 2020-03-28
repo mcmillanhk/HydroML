@@ -97,7 +97,7 @@ class CamelsDataset(Dataset):
                                                "dayl_std", "prcp_std", "srad_std",
                                                "swe_std",
                                                "tmax_std", "tmin_std", "vp_std"])
-        for idx_site in range(int(self.num_sites/subsample_data)): #Load less sites
+        for idx_site in range(max(int(self.num_sites/subsample_data), 1)):  #Load less sites
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
             flow_file = gauge_id + '_streamflow_qc.txt'
@@ -141,11 +141,11 @@ class CamelsDataset(Dataset):
                 runningtotaltmp = runningtotaltmp + numsamplestmp
 
             """Calculate flow data average"""
-            flow_data_mmd_mean = np.nanmean(flow_data['flow(cfs)'])*0.101947/self.area_data.loc[gauge_id, 'area_gages2']
+            flow_data_mmd_mean = np.nanmean(flow_data['flow(cfs)'])*2.446575546/self.area_data.loc[gauge_id, 'area_gages2']
 
             #flow_data['flow(cfs)'] = flow_data['flow(cfs)'].replace(-999, np.nan)
 
-            flow_std = np.nanstd(flow_data['flow(cfs)']) * 0.101947 / self.area_data.loc[
+            flow_std = np.nanstd(flow_data['flow(cfs)']) * 2.446575546 / self.area_data.loc[
                 gauge_id, 'area_gages2']
 
             climate_data = climate_data.replace(-999, np.nan)
@@ -235,11 +235,14 @@ class CamelsDataset(Dataset):
 
         self.num_samples = runningtotaltmp
 
+        self.all_csv_files = {}
+
         self.load_all = True
         if self.load_all:
             #pool = Pool(4)
             self.all_items = [self.load_item(i) for i in range(0, self.num_samples)]
             #self.all_items = pool.map(self.load_item, range(0, self.num_samples))
+            self.all_csv_files = None
 
     def __len__(self):
 
@@ -263,28 +266,7 @@ class CamelsDataset(Dataset):
 
         """Get file names for climate and flow"""
         gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
-        climate_file = gauge_id + '_lump_cida_forcing_leap.txt'
-        flow_file = gauge_id +  '_streamflow_qc.txt'
-        climate_data_name = os.path.join(self.root_dir_climate,climate_file)
-        flow_data_name = os.path.join(self.root_dir_flow, flow_file)
-        #  print("Got file names")
-
-        """Extract correct years out of each file"""
-        flow_data_ymd = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
-                                names=["year", "month", "day", "flow(cfs)", "qc"])
-        flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
-                                parse_dates=[[1, 2, 3]])
-        flow_data.columns = ["date", "flow(cfs)", "qc"]
-        # convert to float
-        flow_data["flow(cfs)"] = flow_data["flow(cfs)"].astype(float)
-
-        """Missing data label converted to 0/1"""
-        d = {'A': 0, 'A:e': 0, 'M': 1}
-        flow_data["qc"] = flow_data["qc"].map(d)
-        #flow_data["qc"][np.isnan(flow_data["qc"])] = 1
-        #flow_data["qc"] = flow_data["qc"].cumsum() # accumulate
-        ##first_bad_sample = flow_data[flow_data["qc"] == 1].iloc[0]
-        #flow_data = flow_data[flow_data.qc == 0]
+        climate_data, flow_data, flow_data_ymd = self.load_flow_climate_csv(gauge_id)
 
         minyeartmp = flow_data_ymd[(flow_data_ymd["month"] == 1) & (flow_data_ymd["day"] == 1)].min(axis=0)["year"]
         minyearidx = minyeartmp + idx_within_site * self.years_per_sample
@@ -298,46 +280,21 @@ class CamelsDataset(Dataset):
 
         #  print("Extracted Flow Data")
 
-        climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
-                                   usecols=[0, 1, 2, 3, 4,
-                                            5, 6, 7],
-                                   parse_dates=True,
-                                   names=["date", "dayl(s)", "prcp(mm / day)", "srad(W / m2)",
-                                          "swe(mm)", "tmax(C)", "tmin(C)", "vp(Pa)"])
-        climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H') - pd.Timedelta('12 hours')
-        #  print("Extracted Climate Data")
+        """Normalize flow data"""
+        """First to mm/d"""
+        flow_area = self.area_data.loc[gauge_id, 'area_gages2']
+        flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * 2.446575546 / flow_area
+
+        if self.normalize_inputs:
+            """Then normalize"""
+            flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0, 0])/self.flow_norm.iloc[0, 1])
 
         climate_data = climate_data.loc[(climate_data['date'] >= flow_date_start) &
                                         (climate_data['date'] <= flow_date_end)]
         climate_data = climate_data.reset_index(drop=True)
 
-        """Normalize climate data"""
-        # These have high means
-        climate_data["dayl(s)"] = ((climate_data["dayl(s)"] - self.climate_norm.loc["dayl", "mean"]) /
-                                   self.climate_norm.loc["dayl", "std"])
-        climate_data["vp(Pa)"] = ((climate_data["vp(Pa)"] - self.climate_norm.loc["vp", "mean"]) /
-                                  self.climate_norm.loc["vp", "std"])
-        climate_data["srad(W / m2)"] = ((climate_data["srad(W / m2)"] - self.climate_norm.loc["srad", "mean"]) /
-                                        self.climate_norm.loc["srad", "std"])
-
-        if self.normalize_inputs:
-            climate_data["prcp(mm / day)"] = ((climate_data["prcp(mm / day)"])/
-                                              self.climate_norm.loc["prcp", "std"])
-            climate_data["swe(mm)"] = ((climate_data["swe(mm)"] - self.climate_norm.loc["swe","mean"]) /
-                                       self.climate_norm.loc["swe", "std"])
-            climate_data["tmax(C)"] = ((climate_data["tmax(C)"] - self.climate_norm.loc["tmax","mean"]) /
-                                       self.climate_norm.loc["tmax", "std"])
-            climate_data["tmin(C)"] = ((climate_data["tmin(C)"] - self.climate_norm.loc["tmin","mean"]) /
-                                       self.climate_norm.loc["tmin", "std"])
-
-        """Normalize flow data"""
-        """First to mm/d"""
-        flow_area = self.area_data.loc[gauge_id, 'area_gages2']
-        flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * 0.101947 / flow_area
-
-        if self.normalize_inputs:
-            """Then normalize"""
-            flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0, 0])/self.flow_norm.iloc[0, 1])
+        print("Av flow=" + str(np.mean(flow_data["flow(cfs)"])))
+        print("Av rain=" + str(np.mean(climate_data["prcp(mm / day)"])))
 
         """Merge climate and flow into one array"""
         hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date', 'swe(mm)'], axis=1)],
@@ -367,6 +324,59 @@ class CamelsDataset(Dataset):
             sample = self.transform(sample)
 
         return sample
+
+    def load_flow_climate_csv(self, gauge_id):
+
+        if gauge_id in self.all_csv_files.keys():
+            return self.all_csv_files[gauge_id]
+
+        climate_file = gauge_id + '_lump_cida_forcing_leap.txt'
+        flow_file = gauge_id + '_streamflow_qc.txt'
+        climate_data_name = os.path.join(self.root_dir_climate, climate_file)
+        flow_data_name = os.path.join(self.root_dir_flow, flow_file)
+        #  print("Got file names")
+        """Extract correct years out of each file"""
+        flow_data_ymd = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
+                                    names=["year", "month", "day", "flow(cfs)", "qc"])
+        flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
+                                parse_dates=[[1, 2, 3]])
+        flow_data.columns = ["date", "flow(cfs)", "qc"]
+        # convert to float
+        flow_data["flow(cfs)"] = flow_data["flow(cfs)"].astype(float)
+        """Missing data label converted to 0/1"""
+        d = {'A': 0, 'A:e': 0, 'M': 1}
+        flow_data["qc"] = flow_data["qc"].map(d)
+        # flow_data["qc"][np.isnan(flow_data["qc"])] = 1
+        # flow_data["qc"] = flow_data["qc"].cumsum() # accumulate
+        ##first_bad_sample = flow_data[flow_data["qc"] == 1].iloc[0]
+        # flow_data = flow_data[flow_data.qc == 0]
+        climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
+                                   usecols=[0, 1, 2, 3, 4,
+                                            5, 6, 7],
+                                   parse_dates=True,
+                                   names=["date", "dayl(s)", "prcp(mm / day)", "srad(W / m2)",
+                                          "swe(mm)", "tmax(C)", "tmin(C)", "vp(Pa)"])
+        climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H') - pd.Timedelta('12 hours')
+        #  print("Extracted Climate Data")
+        """Normalize climate data"""
+        # These have high means
+        climate_data["dayl(s)"] = ((climate_data["dayl(s)"] - self.climate_norm.loc["dayl", "mean"]) /
+                                   self.climate_norm.loc["dayl", "std"])
+        climate_data["vp(Pa)"] = ((climate_data["vp(Pa)"] - self.climate_norm.loc["vp", "mean"]) /
+                                  self.climate_norm.loc["vp", "std"])
+        climate_data["srad(W / m2)"] = ((climate_data["srad(W / m2)"] - self.climate_norm.loc["srad", "mean"]) /
+                                        self.climate_norm.loc["srad", "std"])
+        if self.normalize_inputs:
+            climate_data["prcp(mm / day)"] = ((climate_data["prcp(mm / day)"]) /
+                                              self.climate_norm.loc["prcp", "std"])
+            climate_data["swe(mm)"] = ((climate_data["swe(mm)"] - self.climate_norm.loc["swe", "mean"]) /
+                                       self.climate_norm.loc["swe", "std"])
+            climate_data["tmax(C)"] = ((climate_data["tmax(C)"] - self.climate_norm.loc["tmax", "mean"]) /
+                                       self.climate_norm.loc["tmax", "std"])
+            climate_data["tmin(C)"] = ((climate_data["tmin(C)"] - self.climate_norm.loc["tmin", "mean"]) /
+                                       self.climate_norm.loc["tmin", "std"])
+        self.all_csv_files[gauge_id] = [climate_data, flow_data, flow_data_ymd]
+        return self.all_csv_files[gauge_id]
 
 
 class ToTensor(object):
