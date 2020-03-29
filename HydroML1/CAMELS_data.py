@@ -69,6 +69,7 @@ class CamelsDataset(Dataset):
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
         self.transform = transform
+        self.hyd_data_labels = None
         self.years_per_sample = years_per_sample
 
         """number of samples depends on years/sample. 35 years total; use up to 34 as 35 has a lot of missing data"""
@@ -316,9 +317,11 @@ class CamelsDataset(Dataset):
         if np.isnan(signatures).any() or signatures[signatures == -999].any():
             raise Exception('nan in signatures')
 
+        self.hyd_data_labels = hyd_data.columns
+
         #hyd_data is t x i
         sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start),
-                  'hyd_data': hyd_data, 'signatures': signatures}
+                  'hyd_data': hyd_data, 'signatures': signatures}  #, 'hyd_data_labels': hyd_data.columns}
 
         if self.transform:
             sample = self.transform(sample)
@@ -384,7 +387,7 @@ class ToTensor(object):
 
     def __call__(self, sample):
         gauge_id, date_start, hyd_data, signatures = sample['gauge_id'], sample['date_start'], sample['hyd_data'], \
-                                                     sample['signatures']
+                                                     sample['signatures']  # , sample['hyd_data_labels']
         # Extract components from input sample
 
         # swap axes because
@@ -398,4 +401,4 @@ class ToTensor(object):
         hyd_data_tensor.double()
         signatures_tensor = torch.from_numpy(signatures)
         signatures_tensor.double()
-        return [gauge_id, date_start, hyd_data_tensor, signatures_tensor]
+        return [gauge_id, date_start, hyd_data_tensor, signatures_tensor]  #  , list(hyd_data_labels)]

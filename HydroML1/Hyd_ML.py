@@ -64,7 +64,7 @@ def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
     input_dim = 8 + len(attribs)
-    return train_loader, validate_loader, test_loader, input_dim
+    return train_loader, validate_loader, test_loader, input_dim, train_dataset.hyd_data_labels
 
 
 def moving_average(a, n=13):
@@ -239,11 +239,11 @@ class SimpleLSTM(nn.Module):
 
 
 def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_path, num_layers, encoding_dim,
-                       hidden_dim, batch_size, num_sigs):
+                       hidden_dim, batch_size, num_sigs, encoder_indices):
     # Hyperparameters
     modeltype = 'LSTM'  # 'Conv'
     num_epochs = 2
-    learning_rate = 0.00001  # 0.001 works well for the subset. So does .0001
+    learning_rate = 0.0002  # 0.001 works well for the subset. So does .0001
 
     shown = False
 
@@ -267,14 +267,18 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
     total_step = len(train_loader)
     loss_list = []
     acc_list = []
+    #hyd_data_labels = train_loader.hyd_data_labels
     for epoch in range(num_epochs):
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
             # Run the forward pass
+            #hyd_data_labels = train_loader.hyd_data_labels
             if modeltype == 'LSTM':
                 model.hidden = model.init_hidden()
                 hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
 
-            if epoch == 0:
+            if True:
+                hyd_data = hyd_data[:, :, encoder_indices]
+            elif epoch == 0:
                 hyd_data = only_rain(hyd_data)
 
             outputs = model(hyd_data)
@@ -351,9 +355,8 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
         error_test = None
         error_baseline = None
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(test_loader):
-            outputs = model(hyd_data.permute(2, 0, 1))
+            outputs = model(hyd_data.permute(2, 0, 1)[:, :, encoder_indices])
             predicted = outputs[:, -1, :]
-
             error = predicted.squeeze() - signatures.squeeze()
             error_bl = signatures  # relative to predicting 0 for everything
             if error_test is None:
@@ -398,12 +401,12 @@ def validate(dataloader, encoder, decoder):
     return
 
 
-def setup_encoder_decoder(input_dim, pretrained_encoder_path, encoder_layers, encoding_dim,
+def setup_encoder_decoder(encoder_input_dim, decoder_input_dim, pretrained_encoder_path, encoder_layers, encoding_dim,
                           hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim):
-    encoder = SimpleLSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
+    encoder = SimpleLSTM(input_dim=encoder_input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
                          num_layers=encoder_layers, encoding_dim=encoding_dim).double()
 
-    decoder_input_dim = input_dim + encoding_dim - 1  # -1 for flow
+    decoder_input_dim = decoder_input_dim + encoding_dim - 1  # -1 for flow
     decoder_hidden_dim = 25
     output_dim = 1
     output_layers = 2
@@ -423,7 +426,7 @@ def setup_encoder_decoder(input_dim, pretrained_encoder_path, encoder_layers, en
 
 
 #Expect encoder is pretrained, decoder is not
-def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, model_store_path, model):
+def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, model_store_path, model):
     coupled_learning_rate = 0.0001
     output_epochs = 25
 
@@ -441,7 +444,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, model
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
 
             restricted_input = epoch == 0
-            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, restricted_input, model)
+            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model)
 
             error, loss = compute_loss(criterion, flow, hyd_data, outputs)
             loss_list.append(loss.item())
@@ -487,7 +490,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, model
                 fig.show()
 
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(validate_loader):
-            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, restricted_input, model)
+            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model)
             _, loss = compute_loss(criterion, flow, hyd_data, outputs)
             validate_loss_list.append(loss.item())
 
@@ -511,19 +514,19 @@ def compute_loss(criterion, flow, hyd_data, outputs):
     return error, loss
 
 
-def run_encoder_decoder(decoder, encoder, hyd_data, restricted_input, model):
+def run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model):
     if model == ModelType.LSTM:
         flow, outputs = run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input)
     else:
-        flow, outputs = run_encoder_decoder_hydmodel(decoder, encoder, hyd_data)
+        flow, outputs = run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices)
     return flow, outputs
 
 
-def run_encoder_decoder_hydmodel(decoder, encoder, hyd_data):
+def run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices):
     hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
     # Run the forward pass
     encoder.hidden = encoder.init_hidden()
-    temp = encoder(hyd_data)  # b x t x o
+    temp = encoder(hyd_data[:, :, encoder_indices])  # b x t x o
     encoding = temp[:, -1, :]  # b x o
     # print("Encoding " + str(encoding))
     #decoder.init_stores()
@@ -569,8 +572,9 @@ def run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input):
 def train_test_everything():
     batch_size = 20
 
-    train_loader, validate_loader, test_loader, input_dim = load_inputs(subsample_data=1, years_per_sample=2,
-                                                                        batch_size=batch_size)
+    train_loader, validate_loader, test_loader, input_dim, hyd_data_labels = load_inputs(subsample_data=10,
+                                                                                         years_per_sample=2,
+                                                                                         batch_size=batch_size)
     #TODO input_dim should come from the loaders
     model_store_path = 'D:\\Hil_ML\\pytorch_models\\temp\\'
 
@@ -583,21 +587,29 @@ def train_test_everything():
     decoder_model_type = ModelType.HydModel
 
     pretrained_encoder_path = model_store_path + 'lstm_net_model-2outputlayer.ckpt'
-    if False:
-        train_encoder_only(train_loader, test_loader=validate_loader, input_dim=input_dim,
+
+    if True:
+        encoder_names = "prcp(mm / day)", 'flow(cfs)', "swe(mm)", "tmax(C)"
+        indices = [i for i, x in enumerate(hyd_data_labels) if x in encoder_names]
+        #indices = list(hyd_data_labels).index()
+        encoder_input_dim = len(indices)
+
+    if True:
+        train_encoder_only(train_loader, test_loader=validate_loader, input_dim=encoder_input_dim,
                            pretrained_encoder_path=pretrained_encoder_path,
                            num_layers=encoding_num_layers, encoding_dim=encoding_dim,
                            hidden_dim=encoding_hidden_dim,
-                           num_sigs=num_sigs, batch_size=batch_size)
+                           num_sigs=num_sigs, batch_size=batch_size, encoder_indices=indices)
 
-    encoder, decoder = setup_encoder_decoder(input_dim, pretrained_encoder_path=pretrained_encoder_path,
+    encoder, decoder = setup_encoder_decoder(encoder_input_dim=encoder_input_dim, decoder_input_dim=input_dim,
+                                             pretrained_encoder_path=pretrained_encoder_path,
                                              encoder_layers=encoding_num_layers, encoding_dim=encoding_dim,
                                              hidden_dim=encoding_hidden_dim, num_sigs=num_sigs,
                                              batch_size=batch_size, decoder_model_type=decoder_model_type,
                                              store_dim=store_dim)
 
-    train_encoder_decoder(train_loader, validate_loader, encoder, decoder, model_store_path=model_store_path,
-                          model=decoder_model_type)
+    train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices=indices,
+                          model_store_path=model_store_path, model=decoder_model_type)
 
 
 train_test_everything()
