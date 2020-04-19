@@ -298,7 +298,8 @@ class CamelsDataset(Dataset):
         print("Av rain=" + str(np.mean(climate_data["prcp(mm / day)"])))
 
         """Merge climate and flow into one array"""
-        hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date', 'swe(mm)'], axis=1)],
+        hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date'  #, 'swe(mm)'
+                                                                                 ], axis=1)],
                              axis=1, join='inner')
 
         #print('Load ' + gauge_id)
@@ -317,7 +318,9 @@ class CamelsDataset(Dataset):
         if np.isnan(signatures).any() or signatures[signatures == -999].any():
             raise Exception('nan in signatures')
 
-        self.hyd_data_labels = hyd_data.columns
+        #self.hyd_data_labels = hyd_data.columns
+        self.hyd_data_labels = [label.strip() for label in hyd_data.columns]
+
 
         #hyd_data is t x i
         sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start),

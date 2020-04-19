@@ -63,7 +63,7 @@ def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
     validate_loader = DataLoader(dataset=validate_dataset, batch_size=1, shuffle=False)
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
-    input_dim = 8 + len(attribs)
+    input_dim = 9 + len(attribs)
     return train_loader, validate_loader, test_loader, input_dim, train_dataset.hyd_data_labels
 
 
@@ -107,13 +107,16 @@ class ConvNet(nn.Module):
 class HydModelNet(nn.Module):
 
     def __init__(self, input_dim, hidden_dim, store_dim,
-                 num_layers):
+                 num_layers, flow_between_stores=True):
         super(HydModelNet, self).__init__()
 
         input_plus_stores_dim = input_dim + store_dim
+        self.flow_between_stores = flow_between_stores
         self.dropout = nn.Dropout(0.5)
         self.inflow = self.make_inflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_dim+1)
-        self.outflow = self.make_outflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_dim)
+
+        store_outflow_dim = store_dim*(store_dim+2) + flow_between_stores if flow_between_stores else store_dim
+        self.outflow = self.make_outflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_outflow_dim)
         self.store_dim = store_dim
         self.stores = torch.zeros([store_dim])
 
@@ -135,10 +138,14 @@ class HydModelNet(nn.Module):
         for i in range(num_layers):
             this_input_dim = input_dim if i == 0 else hidden_dim
             this_output_dim = hidden_dim if i < num_layers-1 else output_dim
-            layers.append(nn.Linear(this_input_dim, this_output_dim))
+            layer = nn.Linear(this_input_dim, this_output_dim)
+            if i == num_layers-1:
+                layer.bias.data -= 1 # Make the initial values generally small
+            layers.append(layer)
             layers.append(nn.Sigmoid())  # output in 0..1
             if i < num_layers-1:
                 layers.append(self.dropout)
+
         return nn.Sequential(*layers)
 
     def init_stores(self, batch_size):
@@ -170,13 +177,29 @@ class HydModelNet(nn.Module):
             #print('a0=' + str(a[0, :]))
             #print('rain[i, :].unsqueeze(1)=' + str(rain[i, 0]))
             #print('rain_distn=' + str(rain_distn[0, :]))
-            self.stores = self.stores + rain_distn
-            b = self.outflow(inputs)
+            self.stores = self.stores + rain_distn  # stores is b x s
+            b = self.outflow(inputs)  # b x s+
 
             if b.min() < 0 or b.max() > 1:
                 raise Exception("Relative outflow flux outside [0,1]\n" + str(b))
 
-            flow_distn = b * self.stores
+            num_stores = self.stores.shape[1]
+            if self.flow_between_stores:
+                for destStoreId in range(num_stores):  # Model flow from all other stores to this destination
+                    b_interstore = b[:, (destStoreId*num_stores):((destStoreId+1)*num_stores)]
+                    #b_interstore[:, storeId] += 1  # b x s
+                    #b_interstore = nn.Softmax()(b_interstore, dim=1)
+                    flow_between = b_interstore * self.stores  # b x s
+                    self.stores = self.stores - flow_between
+                    self.stores[:, destStoreId] = self.stores[:, destStoreId] + flow_between.sum(dim=1)
+
+                b_escape = b[:, (-2 * num_stores):(-1 * num_stores)]
+                escape = b_escape * self.stores
+                self.stores = self.stores - escape
+
+            b_flow = b[:, (-num_stores):]
+
+            flow_distn = b_flow * self.stores
             self.stores = self.stores - flow_distn
 
             if self.stores.min() < 0:
@@ -426,11 +449,11 @@ def setup_encoder_decoder(encoder_input_dim, decoder_input_dim, pretrained_encod
 
 
 #Expect encoder is pretrained, decoder is not
-def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, model_store_path, model):
-    coupled_learning_rate = 0.0001
+def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, decoder_indices, model_store_path, model):
+    coupled_learning_rate = 0.05
     output_epochs = 25
 
-    criterion = nn.MSELoss()
+    criterion = nn.SmoothL1Loss()  #  nn.MSELoss()
     optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()),
                                  lr=coupled_learning_rate, weight_decay=0.005)
 
@@ -444,7 +467,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
 
             restricted_input = epoch == 0
-            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model)
+            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
+                                                decoder_indices)
 
             error, loss = compute_loss(criterion, flow, hyd_data, outputs)
             loss_list.append(loss.item())
@@ -456,7 +480,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
             acc_list.append(error.item())
 
-            if (i + 1) % 5 == 0:
+            if (i + 1) % 50 == total_step % 50:
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error, decimals=3))))
@@ -490,7 +514,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 fig.show()
 
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(validate_loader):
-            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model)
+            flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
+                                                decoder_indices)
             _, loss = compute_loss(criterion, flow, hyd_data, outputs)
             validate_loss_list.append(loss.item())
 
@@ -514,15 +539,15 @@ def compute_loss(criterion, flow, hyd_data, outputs):
     return error, loss
 
 
-def run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model):
+def run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model, decoder_indices):
     if model == ModelType.LSTM:
         flow, outputs = run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input)
     else:
-        flow, outputs = run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices)
+        flow, outputs = run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices, decoder_indices)
     return flow, outputs
 
 
-def run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices):
+def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, hyd_data, encoder_indices, decoder_indices):
     hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
     # Run the forward pass
     encoder.hidden = encoder.init_hidden()
@@ -538,7 +563,9 @@ def run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices):
     #if restricted_input:
     #    hyd_data = only_rain(hyd_data)
     flow = hyd_data[:, :, 0]  # t x b
-    hyd_data = hyd_data[:, :, 1:]
+    not_decoder_indices = list(set(range(hyd_data.shape[2])) - set(decoder_indices))
+    hyd_data[:, :, not_decoder_indices] = 0
+    hyd_data = hyd_data[:, :, 1:]  # drop flow
     outputs = decoder(hyd_data)  # b x t
     if torch.max(np.isnan(outputs.data)) == 1:
         raise Exception('nan generated')
@@ -586,15 +613,18 @@ def train_test_everything():
 
     decoder_model_type = ModelType.HydModel
 
-    pretrained_encoder_path = model_store_path + 'lstm_net_model-2outputlayer.ckpt'
+    pretrained_encoder_path = model_store_path + 'lstm_net_model-4inputs-april-12.ckpt'
 
     if True:
-        encoder_names = "prcp(mm / day)", 'flow(cfs)', "swe(mm)", "tmax(C)"
-        indices = [i for i, x in enumerate(hyd_data_labels) if x in encoder_names]
+        encoder_names = ["prcp(mm / day)", 'flow(cfs)', "swe(mm)", "tmax(C)"]
+        indices = getIndices(encoder_names, hyd_data_labels)
         #indices = list(hyd_data_labels).index()
         encoder_input_dim = len(indices)
 
-    if True:
+        decoder_names = encoder_names
+        decoder_indices = getIndices(decoder_names, hyd_data_labels)
+
+    if False:
         train_encoder_only(train_loader, test_loader=validate_loader, input_dim=encoder_input_dim,
                            pretrained_encoder_path=pretrained_encoder_path,
                            num_layers=encoding_num_layers, encoding_dim=encoding_dim,
@@ -609,7 +639,19 @@ def train_test_everything():
                                              store_dim=store_dim)
 
     train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices=indices,
+                          decoder_indices=decoder_indices,
                           model_store_path=model_store_path, model=decoder_model_type)
+
+
+def getIndices(encoder_names, hyd_data_labels):
+    indices = [i for i, x in enumerate(hyd_data_labels) if x in encoder_names]
+    #indices = []
+    #for i, x in enumerate(hyd_data_labels):
+    #    if x in encoder_names:
+    #        indices = [indices, i]
+    if len(indices) != len(encoder_names):
+        raise Exception()
+    return indices
 
 
 train_test_everything()
