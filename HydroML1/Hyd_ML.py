@@ -7,6 +7,7 @@ import os
 import math
 import matplotlib.pyplot as plt
 from enum import Enum
+import time
 
 
 class ModelType(Enum):
@@ -60,11 +61,13 @@ def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
     # Data loader
     #if __name__ == '__main__':
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-    validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size, shuffle=False)
+    validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size, shuffle=True)  # Shuffle so we get
+                                                                    # less spiky validation plots
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
     input_dim = 9 + len(attribs)
-    return train_loader, validate_loader, test_loader, input_dim, train_dataset.hyd_data_labels
+    return train_loader, validate_loader, test_loader, input_dim, train_dataset.hyd_data_labels, \
+           train_dataset.sig_labels
 
 
 def moving_average(a, n=13):
@@ -707,12 +710,47 @@ def run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input):
     return flow, outputs
 
 
+def preview_data(train_loader, hyd_data_labels, sig_labels):
+    for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+        for idx, label in enumerate(hyd_data_labels):  # hyd_data is b x i x t
+            fig = plt.figure()
+            ax_input = fig.add_subplot(1, 1, 1)
+            #ax_loss = fig.add_subplot(2, 1, 2)
+            fig.canvas.draw()
+            attrib = hyd_data[:, idx, :].detach().numpy()  # b x t
+            l_model = None
+            for batch_idx in range(attrib.shape[0]):
+                l_model, = ax_input.plot(attrib[batch_idx, :], color='r', label='Model')  # Batch 0
+
+            ax_input.legend([l_model], [label], loc="upper right")
+            time.sleep(1)
+            fig.show()
+
+        for idx, label in enumerate(sig_labels):
+            fig = plt.figure()
+            ax_input = fig.add_subplot(1, 1, 1)
+            fig.canvas.draw()
+            sigs = signatures[:, idx].detach().numpy()
+            l_model = None
+            for batch_idx in range(attrib.shape[0]):
+                l_model, = ax_input.plot([sigs[batch_idx], sigs[batch_idx]], color='r', label='Model')  # Batch 0
+
+            ax_input.legend([l_model], [label], loc="upper right")
+            fig.show()
+            time.sleep(1)
+
+        break
+
+
 def train_test_everything():
     batch_size = 20
 
-    train_loader, validate_loader, test_loader, input_dim, hyd_data_labels = load_inputs(subsample_data=1,
-                                                                                         years_per_sample=2,
-                                                                                         batch_size=batch_size)
+    train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
+        = load_inputs(subsample_data=50, years_per_sample=2, batch_size=batch_size)
+
+    if False:
+        preview_data(train_loader, hyd_data_labels, sig_labels)
+
     #TODO input_dim should come from the loaders
     model_store_path = 'D:\\Hil_ML\\pytorch_models\\4-LRdiv100\\'
 
@@ -730,7 +768,7 @@ def train_test_everything():
     encoder_indices = None
     decoder_indices = None
     if True:
-        encoder_names = ["prcp(mm / day)", 'flow(cfs)', "swe(mm)", "tmax(C)"]
+        encoder_names = ["prcp(mm/day)", 'flow(cfs)', "tmax(C)"]  #"swe(mm)",
         encoder_indices = get_indices(encoder_names, hyd_data_labels)
         #indices = list(hyd_data_labels).index()
         encoder_input_dim = len(encoder_indices)
