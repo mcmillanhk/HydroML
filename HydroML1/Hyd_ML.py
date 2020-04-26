@@ -60,7 +60,7 @@ def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
     # Data loader
     #if __name__ == '__main__':
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-    validate_loader = DataLoader(dataset=validate_dataset, batch_size=1, shuffle=False)
+    validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size, shuffle=False)
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
     input_dim = 9 + len(attribs)
@@ -284,7 +284,7 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
     # Loss and optimizer
     criterion = nn.SmoothL1Loss()
     optimizer = torch.optim.Adam(model.parameters(),
-                                 lr=learning_rate, weight_decay=0.005)
+                                 lr=learning_rate)  # weight_decay=0.005
 
     # Train the model
     total_step = len(train_loader)
@@ -460,7 +460,7 @@ def train_decoder_only_fakedata_inputs(decoder: HydModelNet, input_size, store_s
 
     criterion = nn.MSELoss()  #  nn.MSELoss()
     optimizer = torch.optim.Adam(list(decoder.inflow.parameters()),
-                                 lr=coupled_learning_rate, weight_decay=0.005)
+                                 lr=coupled_learning_rate)  # , weight_decay=0.005
 
     loss_list = []
     inflow_inputs = input_size + store_size
@@ -501,11 +501,11 @@ def train_decoder_only_fakedata_inputs(decoder: HydModelNet, input_size, store_s
 
 
 def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_size, batch_size, index_temp):
-    coupled_learning_rate = 0.0002
+    coupled_learning_rate = 0.002
 
     criterion = nn.MSELoss()  #  nn.MSELoss()
     optimizer = torch.optim.Adam(list(decoder.outflow.parameters()),
-                                 lr=coupled_learning_rate, weight_decay=0.005)
+                                 lr=coupled_learning_rate)  #, weight_decay=0.005
 
     loss_list = []
     inflow_inputs = input_size + store_size
@@ -560,12 +560,12 @@ def make_fake_inputs(batch_size, epoch, index_temp, inflow_inputs, input_size):
 #Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, decoder_indices,
                           model_store_path, model):
-    coupled_learning_rate = 0.05
+    coupled_learning_rate = 0.0001
     output_epochs = 25
 
     criterion = nn.SmoothL1Loss()  #  nn.MSELoss()
     optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()),
-                                 lr=coupled_learning_rate, weight_decay=0.005)
+                                 lr=coupled_learning_rate)  #, weight_decay=0.005
 
     total_step = len(train_loader)
     loss_list = []
@@ -641,7 +641,7 @@ def compute_loss(criterion, flow, hyd_data, outputs):
         outputs = outputs.unsqueeze(1)
 
     output_flow_after_start = outputs[spinup:, :]
-    loss = criterion(output_flow_after_start.squeeze(), gt_flow_after_start)
+    loss = criterion(output_flow_after_start, gt_flow_after_start)
     if torch.isnan(loss):
         raise Exception('loss is nan')
     # Track the accuracy
@@ -710,11 +710,11 @@ def run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input):
 def train_test_everything():
     batch_size = 20
 
-    train_loader, validate_loader, test_loader, input_dim, hyd_data_labels = load_inputs(subsample_data=10,
+    train_loader, validate_loader, test_loader, input_dim, hyd_data_labels = load_inputs(subsample_data=1,
                                                                                          years_per_sample=2,
                                                                                          batch_size=batch_size)
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\temp\\'
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\4-LRdiv100\\'
 
     encoding_num_layers = 2
     encoding_dim = 25
@@ -739,7 +739,7 @@ def train_test_everything():
         decoder_names = encoder_names
         decoder_indices = get_indices(decoder_names, hyd_data_labels)
 
-    if False:
+    if True:
         train_encoder_only(train_loader, test_loader=validate_loader, input_dim=encoder_input_dim,
                            pretrained_encoder_path=pretrained_encoder_path,
                            num_layers=encoding_num_layers, encoding_dim=encoding_dim,

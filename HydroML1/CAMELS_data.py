@@ -12,6 +12,8 @@ from torch.utils.data import Dataset, DataLoader
 #import datetime
 #from multiprocessing import Pool
 
+cfs2mm = 2.446575546
+
 # Ignore warnings
 import warnings
 warnings.filterwarnings("ignore")
@@ -98,6 +100,7 @@ class CamelsDataset(Dataset):
                                                "dayl_std", "prcp_std", "srad_std",
                                                "swe_std",
                                                "tmax_std", "tmin_std", "vp_std"])
+        runningtotaltmp = 0
         for idx_site in range(max(int(self.num_sites/subsample_data), 1)):  #Load less sites
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
@@ -123,10 +126,10 @@ class CamelsDataset(Dataset):
             flow_data = flow_data[flow_data.qc == 0]
 
             """Find first/last year of data"""
-            minyeartmp = flow_data[(flow_data["month"]==1)&(flow_data["day"]==1)].min(axis=0)["year"]
+            minyeartmp = flow_data[(flow_data["month"] == 1) & (flow_data["day"] == 1)].min(axis=0)["year"]
             if np.isnan(minyeartmp):
                 minyeartmp = -1
-            maxyeartmp = flow_data[(flow_data["month"]==12)&(flow_data["day"]==30)].max(axis=0)["year"]
+            maxyeartmp = flow_data[(flow_data["month"] == 12) & (flow_data["day"] == 30)].max(axis=0)["year"]
             if np.isnan(maxyeartmp):
                 maxyeartmp = minyeartmp
             maxyeartmp = min(maxyeartmp, maxgoodyear)
@@ -136,22 +139,20 @@ class CamelsDataset(Dataset):
             numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
             #except: print("break")
 
-            if idx_site == 0:
-                runningtotaltmp = numsamplestmp
-            else:
-                runningtotaltmp = runningtotaltmp + numsamplestmp
+            runningtotaltmp += numsamplestmp
 
-            """Calculate flow data average"""
-            flow_data_mmd_mean = np.nanmean(flow_data['flow(cfs)'])*2.446575546/self.area_data.loc[gauge_id, 'area_gages2']
+            """Calculate flow data average""
+            flow_data_mmd_mean = np.nanmean(flow_data['flow(cfs)'])*cfs2mm/self.area_data.loc[gauge_id,
+                                                                                              'area_gages2']
 
             #flow_data['flow(cfs)'] = flow_data['flow(cfs)'].replace(-999, np.nan)
 
-            flow_std = np.nanstd(flow_data['flow(cfs)']) * 2.446575546 / self.area_data.loc[
+            ""flow_std = np.nanstd(flow_data['flow(cfs)']) * cfs2mm / self.area_data.loc[
                 gauge_id, 'area_gages2']
 
             climate_data = climate_data.replace(-999, np.nan)
 
-            """Calculate climate data mean and std"""
+            ""Calculate climate data mean and std""
             dayl_mean = np.nanmean(climate_data["dayl(s)"])
             prcp_mean = np.nanmean(climate_data["prcp(mm / day)"])
             srad_mean = np.nanmean(climate_data["srad(W / m2)"])
@@ -167,7 +168,7 @@ class CamelsDataset(Dataset):
             tmin_std = np.nanstd(climate_data["tmin(C)"])
             vp_std = np.nanstd(climate_data["vp(Pa)"])
 
-            """Write to table"""
+            ""Write to table""
             self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]] = \
                 [minyeartmp, maxyeartmp, numyearstmp, numsamplestmp, runningtotaltmp, flow_data_mmd_mean, flow_std,
                  dayl_mean, prcp_mean, srad_mean,
@@ -175,7 +176,7 @@ class CamelsDataset(Dataset):
                  dayl_std, prcp_std, srad_std,
                  swe_std, tmax_std, tmin_std, vp_std]
 
-        """Normalization of signatures"""
+        ""Normalization of signatures""
         sig_norm = self.signatures_frame.iloc[:, 1:]
         sig_norm_mean = np.nanmean(sig_norm,axis=0)
         sig_norm_std = np.nanstd(sig_norm,axis=0)
@@ -187,7 +188,7 @@ class CamelsDataset(Dataset):
             sig_norm_std[8] = 20
             sig_norm_std[9] = 100
             sig_norm_std[10] = 20
-            sig_norm_std[12] = 100
+            sig_norm_std[12] = 100"""
 
         self.signatures_frame.iloc[:, 1:] = ((self.signatures_frame.iloc[:, 1:] - sig_norm_mean)/sig_norm_std)
 
@@ -200,7 +201,7 @@ class CamelsDataset(Dataset):
                                       index=['flow'],
                                       columns=['mean', 'std'])
 
-        """Normalization of climate data"""
+        ""Normalization of climate data""
         dayl_overall_mean = np.nanmean(self.siteyears['dayl_av'])
         dayl_overall_std = (np.nanmean((self.siteyears['dayl_std']) ** 2 +
                                   (self.siteyears['dayl_av'] - dayl_overall_mean) ** 2)) ** (1 / 2.0)
@@ -232,7 +233,7 @@ class CamelsDataset(Dataset):
                                                    [vp_overall_mean, vp_overall_std]]),
                                          index=['dayl', 'prcp', 'srad',
                                                 'swe', 'tmax', 'tmin', 'vp'],
-                                         columns=['mean', 'std'])
+                                         columns=['mean', 'std'])"""
 
         self.num_samples = runningtotaltmp
 
@@ -284,10 +285,10 @@ class CamelsDataset(Dataset):
         """Normalize flow data"""
         """First to mm/d"""
         flow_area = self.area_data.loc[gauge_id, 'area_gages2']
-        flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * 2.446575546 / flow_area
+        flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * cfs2mm / flow_area
 
         if self.normalize_inputs:
-            """Then normalize"""
+            ""Then normalize""
             flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0, 0])/self.flow_norm.iloc[0, 1])
 
         climate_data = climate_data.loc[(climate_data['date'] >= flow_date_start) &
