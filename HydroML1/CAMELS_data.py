@@ -114,7 +114,7 @@ class CamelsDataset(Dataset):
             climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
                                        usecols=[0, 1, 2, 3, 4, 5, 6, 7],
                                        parse_dates=True,
-                                       names=["date", "dayl(s)", "prcp(mm / day)", "srad(W / m2)", "swe(mm)",
+                                       names=["date", "dayl(s)", "prcp(mm/day)", "srad(W / m2)", "swe(mm)",
                                               "tmax(C)", "tmin(C)", "vp(Pa)"])
 
             #flow_data = flow_data[flow_data.qc != 'M']

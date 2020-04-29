@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 from enum import Enum
 import time
 
+weight_decay = 0.001
+
 
 class ModelType(Enum):
     LSTM = 0
@@ -61,11 +63,11 @@ def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
     # Data loader
     #if __name__ == '__main__':
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-    validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size, shuffle=True)  # Shuffle so we get
-                                                                    # less spiky validation plots
+    validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size,
+                                 shuffle=True)  # Shuffle so we get less spiky validation plots
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
-    input_dim = 9 + len(attribs)
+    input_dim = 8 + len(attribs)
     return train_loader, validate_loader, test_loader, input_dim, train_dataset.hyd_data_labels, \
            train_dataset.sig_labels
 
@@ -110,7 +112,7 @@ class ConvNet(nn.Module):
 class HydModelNet(nn.Module):
 
     def __init__(self, input_dim, hidden_dim, store_dim,
-                 num_layers, flow_between_stores=True):
+                 num_layers, flow_between_stores, hyd_data_labels):
         super(HydModelNet, self).__init__()
 
         input_plus_stores_dim = input_dim + store_dim
@@ -122,8 +124,8 @@ class HydModelNet(nn.Module):
         self.outflow = self.make_outflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_outflow_dim)
         self.store_dim = store_dim
         self.stores = torch.zeros([store_dim])
+        self.hyd_data_labels = hyd_data_labels
 
-    #@staticmethod
     def make_inflow_net(self, num_layers, input_dim, hidden_dim, output_dim):
         layers = []
         for i in range(num_layers):
@@ -162,7 +164,8 @@ class HydModelNet(nn.Module):
         #        torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
 
     def forward(self, hyd_input):  # hyd_input is t x b x i
-        rain = hyd_input[:, :, 2]  # rain is t x b
+        idx_rain = get_indices(['prcp(mm/day)'], self.hyd_data_labels)[0]
+        rain = hyd_input[:, :, idx_rain-1]  # rain is t x b
         steps = hyd_input.shape[0]
         batch_size = hyd_input.shape[1]
         flows = torch.zeros([steps, batch_size]).double()
@@ -269,7 +272,7 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
     # Hyperparameters
     modeltype = 'LSTM'  # 'Conv'
     num_epochs = 2
-    learning_rate = 0.0002  # 0.001 works well for the subset. So does .0001
+    learning_rate = 0.00005  # 0.001 works well for the subset. So does .0001 (maybe too fast though?)
 
     shown = False
 
@@ -287,7 +290,7 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
     # Loss and optimizer
     criterion = nn.SmoothL1Loss()
     optimizer = torch.optim.Adam(model.parameters(),
-                                 lr=learning_rate)  # weight_decay=0.005
+                                 lr=learning_rate, weight_decay=weight_decay)
 
     # Train the model
     total_step = len(train_loader)
@@ -428,7 +431,7 @@ def validate(dataloader, encoder, decoder):
 
 
 def setup_encoder_decoder(encoder_input_dim, decoder_input_dim, pretrained_encoder_path, encoder_layers, encoding_dim,
-                          hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim):
+                          hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim, hyd_data_labels):
     encoder = SimpleLSTM(input_dim=encoder_input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
                          num_layers=encoder_layers, encoding_dim=encoding_dim).double()
 
@@ -445,38 +448,46 @@ def setup_encoder_decoder(encoder_input_dim, decoder_input_dim, pretrained_encod
         decoder = SimpleLSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size,
                              output_dim=output_dim, num_layers=output_layers, encoding_dim=encoding_dim).double()
     elif decoder_model_type == ModelType.HydModel:
-        decoder = HydModelNet(decoder_input_dim, decoder_hidden_dim, store_dim, output_layers)
+        decoder = HydModelNet(decoder_input_dim, decoder_hidden_dim, store_dim, output_layers, True, hyd_data_labels)
     decoder = decoder.double()
 
     return encoder, decoder
 
 
-def train_decoder_only_fakedata(decoder: HydModelNet, input_size, store_size, batch_size, index_temp,
-                                decoder_indices):
-    decoder = train_decoder_only_fakedata_inputs(decoder, input_size, store_size, batch_size, index_temp)
-    decoder = train_decoder_only_fakedata_outputs(decoder, input_size, store_size, batch_size, index_temp)
+def train_decoder_only_fakedata(decoder: HydModelNet, input_size, store_size, batch_size, index_temp_minmax,
+                                weight_temp, decoder_indices):
+    decoder = train_decoder_only_fakedata_inputs(decoder, input_size, store_size, batch_size,
+                                                 index_temp_minmax, weight_temp)
+    decoder = train_decoder_only_fakedata_outputs(decoder, input_size, store_size, batch_size,
+                                                  index_temp_minmax, weight_temp)
     return decoder
 
 
-def train_decoder_only_fakedata_inputs(decoder: HydModelNet, input_size, store_size, batch_size, index_temp):
+def train_decoder_only_fakedata_inputs(decoder: HydModelNet, input_size, store_size, batch_size, index_temp_minmax,
+                                       weight_temp):
     coupled_learning_rate = 0.0002
 
     criterion = nn.MSELoss()  #  nn.MSELoss()
     optimizer = torch.optim.Adam(list(decoder.inflow.parameters()),
-                                 lr=coupled_learning_rate)  # , weight_decay=0.005
+                                 lr=coupled_learning_rate, weight_decay=weight_decay)
 
     loss_list = []
     inflow_inputs = input_size + store_size
 
-    for epoch in range(2000):
-        inputs, inputs_no_flow = make_fake_inputs(batch_size, epoch, index_temp, inflow_inputs, input_size)
+    runs = 2000
+    for epoch in range(runs):
+        scale_stores = epoch > runs/2
+        inputs, inputs_no_flow = make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp, inflow_inputs,
+                                                  input_size)
 
         #inputs = torch.cat((hyd_input[i, :, :], self.stores), 1)
         a = decoder.inflow(inputs_no_flow)
         a = nn.Softmax()(a)  # a is b x stores
         expected = torch.zeros((batch_size, store_size+1)).double()
         for b in range(batch_size):
-            snow = 0.95 if inputs[b, index_temp] < 4 else 0.05
+            temp = (inputs[b, index_temp_minmax[0]] + inputs[b, index_temp_minmax[1]])*0.5/weight_temp
+            temp = temp + 4*(torch.rand(1)[0]-0.5)  # Make boundary fuzzy
+            snow = 0.95 if temp < 4 else 0.05
             expected[b, :] = (1-snow) * 1.0/store_size
             expected[b, store_size] = snow
 
@@ -503,25 +514,29 @@ def train_decoder_only_fakedata_inputs(decoder: HydModelNet, input_size, store_s
     return decoder
 
 
-def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_size, batch_size, index_temp):
+def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_size, batch_size, index_temp,
+                                        weight_temp):
     coupled_learning_rate = 0.002
 
     criterion = nn.MSELoss()  #  nn.MSELoss()
     optimizer = torch.optim.Adam(list(decoder.outflow.parameters()),
-                                 lr=coupled_learning_rate)  #, weight_decay=0.005
+                                 lr=coupled_learning_rate, weight_decay=weight_decay)
 
     loss_list = []
     inflow_inputs = input_size + store_size
 
-    for epoch in range(2000):
-        inputs, inputs_no_flow = make_fake_inputs(batch_size, epoch, index_temp, inflow_inputs, input_size)
+    runs = 2000
+    for epoch in range(runs):
+        scale_stores = epoch > runs/2
+        inputs, inputs_no_flow = make_fake_inputs(batch_size, scale_stores, index_temp, weight_temp, inflow_inputs, input_size)
 
         #inputs = torch.cat((hyd_input[i, :, :], self.stores), 1)
         b = decoder.outflow(inputs_no_flow)  # b x s+
         expected = torch.zeros((batch_size, store_size*(store_size+2))).double() + 0.01
         expected[:, (store_size*store_size):(store_size*(store_size+1))] = 0.2  # random?
         for batch_idx in range(batch_size):
-            snow = max(float(inputs[batch_idx, index_temp]), 2)/50
+            temp = (inputs[batch_idx, index_temp[0]] + inputs[batch_idx, index_temp[1]])*0.5/weight_temp
+            snow = max(float(temp), 2)/50
             snow_store_idx = store_size - 1
             expected[batch_idx, store_size*store_size + snow_store_idx] = snow
             slow_store_idx = store_size * store_size
@@ -551,24 +566,25 @@ def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_
     return decoder
 
 
-def make_fake_inputs(batch_size, epoch, index_temp, inflow_inputs, input_size):
+def make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp, inflow_inputs, input_size):
     inputs = torch.rand((batch_size, inflow_inputs)).double()  # b x i, Uniform[0,1]
-    if epoch > 1000:
+    if scale_stores:
         inputs[:, input_size:] *= 100  # scale up stores
-    inputs[:, index_temp] = 40 * (inputs[:, index_temp] - 0.4)
+    inputs[:, index_temp_minmax[0]] = weight_temp * 40 * (inputs[:, index_temp_minmax[0]]-0.5)
+    inputs[:, index_temp_minmax[1]] = inputs[:, index_temp_minmax[0]] + 10*weight_temp
     inputs_no_flow = inputs[:, 1:]  # drop flow
     return inputs, inputs_no_flow
 
 
 #Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, decoder_indices,
-                          model_store_path, model):
-    coupled_learning_rate = 0.0001
+                          model_store_path, model, hyd_data_labels):
+    coupled_learning_rate = 0.0003
     output_epochs = 25
 
     criterion = nn.SmoothL1Loss()  #  nn.MSELoss()
     optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()),
-                                 lr=coupled_learning_rate)  #, weight_decay=0.005
+                                 lr=coupled_learning_rate, weight_decay=weight_decay)
 
     total_step = len(train_loader)
     loss_list = []
@@ -579,9 +595,9 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         restricted_input = False
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
 
-            restricted_input = epoch == 0
+            restricted_input = False  # epoch == 0
             flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
-                                                decoder_indices)
+                                                decoder_indices, hyd_data_labels)
 
             error, loss = compute_loss(criterion, flow, hyd_data, outputs)
             loss_list.append(loss.item())
@@ -592,6 +608,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             optimizer.step()
 
             acc_list.append(error.item())
+
+            idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
 
             if (i + 1) % 50 == total_step % 50:
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
@@ -605,7 +623,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
                 l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), label='GT flow')  #Batch 0
                 ax_input.set_ylim(0, flow[:, 0].detach().numpy().max()*1.5)
-                rain = -hyd_data[0, 3, :]  # b x i x t
+                rain = -hyd_data[0, idx_rain, :]  # b x i x t
                 ax_rain = ax_input.twinx()
                 l_rain, = ax_rain.plot(rain.detach().numpy(), color='b', label="Rain")  #Batch 0
 
@@ -628,9 +646,10 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(validate_loader):
             flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
-                                                decoder_indices)
+                                                decoder_indices, hyd_data_labels)
             _, loss = compute_loss(criterion, flow, hyd_data, outputs)
-            validate_loss_list.append(loss.item())
+            while len(validate_loss_list) < len(loss_list):
+                validate_loss_list.append(loss.item())
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
@@ -652,15 +671,18 @@ def compute_loss(criterion, flow, hyd_data, outputs):
     return error, loss
 
 
-def run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model, decoder_indices):
+def run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model, decoder_indices,
+                        hyd_data_labels):
     if model == ModelType.LSTM:
         flow, outputs = run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input)
     else:
-        flow, outputs = run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices, decoder_indices)
+        flow, outputs = run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices, decoder_indices,
+                                                     hyd_data_labels)
     return flow, outputs
 
 
-def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, hyd_data, encoder_indices, decoder_indices):
+def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, hyd_data, encoder_indices, decoder_indices,
+                                 hyd_data_labels):
     hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
     # Run the forward pass
     encoder.hidden = encoder.init_hidden()
@@ -746,13 +768,13 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
-        = load_inputs(subsample_data=50, years_per_sample=2, batch_size=batch_size)
+        = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\4-LRdiv100\\'
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\5-cleanupInputs\\'
 
     encoding_num_layers = 2
     encoding_dim = 25
@@ -762,7 +784,7 @@ def train_test_everything():
 
     decoder_model_type = ModelType.HydModel
 
-    pretrained_encoder_path = model_store_path + 'lstm_net_model-4inputs-april-12.ckpt'
+    pretrained_encoder_path = model_store_path + 'encoder.ckpt'
     #pretrained_decoder_path = model_store_path + 'decoder-april19.ckpt'
 
     encoder_indices = None
@@ -789,17 +811,17 @@ def train_test_everything():
                                              encoder_layers=encoding_num_layers, encoding_dim=encoding_dim,
                                              hidden_dim=encoding_hidden_dim, num_sigs=num_sigs,
                                              batch_size=batch_size, decoder_model_type=decoder_model_type,
-                                             store_dim=store_dim)
+                                             store_dim=store_dim, hyd_data_labels=hyd_data_labels)
 
     input_size = input_dim + encoding_dim
-    index_temp_max = get_indices(['tmax(C)'], hyd_data_labels)[0]
-    decoder = train_decoder_only_fakedata(decoder, input_size, store_dim, batch_size, index_temp_max,
+    index_temp_minmax = (get_indices(['tmin(C)'], hyd_data_labels)[0], get_indices(['tmax(C)'], hyd_data_labels)[0])
+
+    decoder = train_decoder_only_fakedata(decoder, input_size, store_dim, batch_size, index_temp_minmax, 0.1,
                                           decoder_indices)
     #return
-
     train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices=encoder_indices,
                           decoder_indices=decoder_indices,
-                          model_store_path=model_store_path, model=decoder_model_type)
+                          model_store_path=model_store_path, model=decoder_model_type, hyd_data_labels=hyd_data_labels)
 
 
 def get_indices(encoder_names, hyd_data_labels):
