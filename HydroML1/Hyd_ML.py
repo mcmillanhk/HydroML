@@ -545,14 +545,14 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error, decimals=3))))
-                fig = plt.figure(figsize=(12, 12))
+                fig = plt.figure(figsize=(18, 18))
                 ax_input = fig.add_subplot(2, 2, 1)
                 ax_loss = fig.add_subplot(2, 2, 2)
                 #fig.canvas.draw()
 
                 l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
-                l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), label='GT flow')  #Batch 0
-                ax_input.set_ylim(0, flow[:, 0].detach().numpy().max()*1.5)
+                l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), label='GT flow', linewidth=0.5)  #Batch 0
+                ax_input.set_ylim(0, flow[:, 0].detach().numpy().max()*1.75)
                 rain = -hyd_data[0, idx_rain, :]  # b x i x t
                 ax_rain = ax_input.twinx()
                 l_rain, = ax_rain.plot(rain.detach().numpy(), color='b', label="Rain")  #Batch 0
@@ -712,7 +712,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\6-2headed\\'
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\7-2headed-dropout\\'
 
     encoder_type = EncType.NoEncoder
     encoding_num_layers = 2
