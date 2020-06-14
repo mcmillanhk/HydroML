@@ -25,7 +25,7 @@ class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
     def __init__(self, csv_file, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample, transform,
-                 subsample_data):
+                 subsample_data, sigs_as_input):
         """
         Args:
             csv_file (string): Path to the csv file with signatures.
@@ -40,6 +40,8 @@ class CamelsDataset(Dataset):
         """
         self.normalize_inputs = False
         self.normalize_outputs = False
+
+        self.sigs_as_input = sigs_as_input
 
         maxgoodyear = 2013  # Don't use any years after this
 
@@ -144,55 +146,6 @@ class CamelsDataset(Dataset):
 
             self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]]["RunningTotal"] = runningtotaltmp
 
-            """Calculate flow data average""
-            flow_data_mmd_mean = np.nanmean(flow_data['flow(cfs)'])*cfs2mm/self.area_data.loc[gauge_id,
-                                                                                              'area_gages2']
-
-            #flow_data['flow(cfs)'] = flow_data['flow(cfs)'].replace(-999, np.nan)
-
-            ""flow_std = np.nanstd(flow_data['flow(cfs)']) * cfs2mm / self.area_data.loc[
-                gauge_id, 'area_gages2']
-
-            climate_data = climate_data.replace(-999, np.nan)
-
-            ""Calculate climate data mean and std""
-            dayl_mean = np.nanmean(climate_data["dayl(s)"])
-            prcp_mean = np.nanmean(climate_data["prcp(mm / day)"])
-            srad_mean = np.nanmean(climate_data["srad(W / m2)"])
-            swe_mean = np.nanmean(climate_data["swe(mm)"])
-            tmax_mean = np.nanmean(climate_data["tmax(C)"])
-            tmin_mean = np.nanmean(climate_data["tmin(C)"])
-            vp_mean = np.nanmean(climate_data["vp(Pa)"])
-            dayl_std = np.nanstd(climate_data["dayl(s)"])
-            prcp_std = np.nanstd(climate_data["prcp(mm / day)"])
-            srad_std = np.nanstd(climate_data["srad(W / m2)"])
-            swe_std = np.nanstd(climate_data["swe(mm)"])
-            tmax_std = np.nanstd(climate_data["tmax(C)"])
-            tmin_std = np.nanstd(climate_data["tmin(C)"])
-            vp_std = np.nanstd(climate_data["vp(Pa)"])
-
-            ""Write to table""
-            self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]] = \
-                [minyeartmp, maxyeartmp, numyearstmp, numsamplestmp, runningtotaltmp, flow_data_mmd_mean, flow_std,
-                 dayl_mean, prcp_mean, srad_mean,
-                 swe_mean, tmax_mean, tmin_mean, vp_mean,
-                 dayl_std, prcp_std, srad_std,
-                 swe_std, tmax_std, tmin_std, vp_std]
-
-        ""Normalization of signatures"""
-        """sig_norm = self.signatures_frame.iloc[:, 1:]
-        sig_norm_mean = np.nanmean(sig_norm,axis=0)
-        sig_norm_std = np.nanstd(sig_norm,axis=0)
-        if not self.normalize_outputs:
-            sig_norm_mean = sig_norm_mean*0
-            sig_norm_std = sig_norm_std*0+1
-            sig_norm_std[6] = 20
-            sig_norm_std[7] = 20
-            sig_norm_std[8] = 20
-            sig_norm_std[9] = 100
-            sig_norm_std[10] = 20
-            sig_norm_std[12] = 100"""
-
         sigs = {
             #'gauge_id': 1,
             'q_mean': 1,
@@ -210,60 +163,9 @@ class CamelsDataset(Dataset):
             'hfd_mean': 0.01,
         }
 
-        """sig_norm_std[6] = 20
-        sig_norm_std[7] = 20
-        sig_norm_std[8] = 20
-        sig_norm_std[9] = 100
-        sig_norm_std[10] = 20
-        sig_norm_std[12] = 100"""
-
         for name, normalizer in sigs.items():
             self.signatures_frame[name] = self.signatures_frame[name].transform(lambda x: x * normalizer)
 
-        """self.signatures_frame.iloc[:, 1:] = ((self.signatures_frame.iloc[:, 1:] - sig_norm_mean)/sig_norm_std)
-
-        ""Normalization of flow data""
-        ""overall_mean = np.nanmean(self.siteyears['Flowmean_mmd'])
-        overall_std = (np.nanmean((self.siteyears['flow_std'])**2 +
-                                  (self.siteyears['Flowmean_mmd']-overall_mean)**2))**(1/2.0)
-
-        self.flow_norm = pd.DataFrame(np.array([[overall_mean, overall_std]]),
-                                      index=['flow'],
-                                      columns=['mean', 'std'])
-
-        ""Normalization of climate data""
-        dayl_overall_mean = np.nanmean(self.siteyears['dayl_av'])
-        dayl_overall_std = (np.nanmean((self.siteyears['dayl_std']) ** 2 +
-                                  (self.siteyears['dayl_av'] - dayl_overall_mean) ** 2)) ** (1 / 2.0)
-        prcp_overall_mean = np.nanmean(self.siteyears['prcp_av'])
-        prcp_overall_std = (np.nanmean((self.siteyears['prcp_std']) ** 2 +
-                                       (self.siteyears['prcp_av'] - prcp_overall_mean) ** 2)) ** (1 / 2.0)
-        srad_overall_mean = np.nanmean(self.siteyears['srad_av'])
-        srad_overall_std = (np.nanmean((self.siteyears['srad_std']) ** 2 +
-                                   (self.siteyears['srad_av'] - srad_overall_mean) ** 2)) ** (1 / 2.0)
-        swe_overall_mean = np.nanmean(self.siteyears['swe_av'])
-        swe_overall_std = (np.nanmean((self.siteyears['swe_std']) ** 2 +
-                                   (self.siteyears['swe_av'] - swe_overall_mean) ** 2)) ** (1 / 2.0)
-        tmax_overall_mean = np.nanmean(self.siteyears['tmax_av'])
-        tmax_overall_std = (np.nanmean((self.siteyears['tmax_std']) ** 2 +
-                                   (self.siteyears['tmax_av'] - tmax_overall_mean) ** 2)) ** (1 / 2.0)
-        tmin_overall_mean = np.nanmean(self.siteyears['tmin_av'])
-        tmin_overall_std = (np.nanmean((self.siteyears['tmin_std']) ** 2 +
-                                   (self.siteyears['tmin_av'] - tmin_overall_mean) ** 2)) ** (1 / 2.0)
-        vp_overall_mean = np.nanmean(self.siteyears['vp_av'])
-        vp_overall_std = (np.nanmean((self.siteyears['vp_std']) ** 2 +
-                                   (self.siteyears['vp_av'] - vp_overall_mean) ** 2)) ** (1 / 2.0)
-
-        self.climate_norm = pd.DataFrame(np.array([[dayl_overall_mean, dayl_overall_std],
-                                                   [prcp_overall_mean, prcp_overall_std],
-                                                   [srad_overall_mean, srad_overall_std],
-                                                   [swe_overall_mean, swe_overall_std],
-                                                   [tmax_overall_mean, tmax_overall_std],
-                                                   [tmin_overall_mean, tmin_overall_std],
-                                                   [vp_overall_mean, vp_overall_std]]),
-                                         index=['dayl', 'prcp', 'srad',
-                                                'swe', 'tmax', 'tmin', 'vp'],
-                                         columns=['mean', 'std'])"""
         self.climate_norm = {
             'dayl(s)':0.00002,
             'prcp(mm/day)': 1,
@@ -350,11 +252,18 @@ class CamelsDataset(Dataset):
             if key != 'gauge_id':
                 hyd_data[key] = attribs[key].iloc[0]
 
+        signatures = self.signatures_frame.iloc[idx_site, 1:]
+        if self.sigs_as_input:
+            #for key in signatures.columns:
+            for key, value in signatures.items():
+                if key == 'gauge_id':
+                    raise Exception("Should have been removed")
+                hyd_data[key] = value
+
         if hyd_data.isnull().any().any() or hyd_data.isin([-999]).any().any():
             raise Exception('nan in hyd data')
 
         """Get signatures related to site"""
-        signatures = self.signatures_frame.iloc[idx_site, 1:]
         self.sig_labels = [label.strip() for label in signatures.axes[0]]
         signatures = np.array([signatures])
         signatures = signatures.astype('double').reshape(-1, 1)
@@ -363,7 +272,6 @@ class CamelsDataset(Dataset):
 
         #self.hyd_data_labels = hyd_data.columns
         self.hyd_data_labels = [label.strip() for label in hyd_data.columns]
-
 
         #hyd_data is t x i
         sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start),

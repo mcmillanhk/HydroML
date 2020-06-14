@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+from Util import *
+import numpy as np
+
 
 class HydModelNet(nn.Module):
 
@@ -10,39 +13,45 @@ class HydModelNet(nn.Module):
         input_plus_stores_dim = input_dim + store_dim
         self.flow_between_stores = flow_between_stores
         self.dropout = nn.Dropout(0.5)
-        self.inflow = self.make_inflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_dim+1)
+        self.flownet = self.make_flow_net(num_layers, input_plus_stores_dim, hidden_dim)
 
-        store_outflow_dim = store_dim*(store_dim+2) if flow_between_stores else store_dim
-        self.outflow = self.make_outflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_outflow_dim)
+        self.store_outflow_dim = store_dim*(store_dim+2) if flow_between_stores else store_dim
+        #self.outflow = self.make_outflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_outflow_dim)
         self.store_dim = store_dim
         self.stores = torch.zeros([store_dim])
         self.hyd_data_labels = hyd_data_labels
 
-    def make_inflow_net(self, num_layers, input_dim, hidden_dim, output_dim):
+        self.outflow_layer = self.make_outflow_layer(hidden_dim, self.store_outflow_dim)
+        self.inflow_layer = self.make_inflow_layer(hidden_dim, store_dim+1)
+
+        self.inflowlog = None
+        self.outflowlog = None
+
+        #def parameters(self, recurse=True):
+
+    def make_flow_net(self, num_layers, input_dim, hidden_dim):
         layers = []
         for i in range(num_layers):
             this_input_dim = input_dim if i == 0 else hidden_dim
-            this_output_dim = hidden_dim if i < num_layers-1 else output_dim
-            layers.append(nn.Linear(this_input_dim, this_output_dim))
+            #this_output_dim = hidden_dim if i < num_layers-1 else output_dim
+            layers.append(nn.Linear(this_input_dim, hidden_dim))
             layers.append(nn.ReLU())
-            if i < num_layers-1:
-                layers.append(self.dropout)
+            #if i < num_layers-1:
+            #    layers.append(self.dropout)
         return nn.Sequential(*layers)
 
-    #@staticmethod
-    def make_outflow_net(self, num_layers, input_dim, hidden_dim, output_dim):
-        layers = []
-        for i in range(num_layers):
-            this_input_dim = input_dim if i == 0 else hidden_dim
-            this_output_dim = hidden_dim if i < num_layers-1 else output_dim
-            layer = nn.Linear(this_input_dim, this_output_dim)
-            if i == num_layers-1:
-                layer.bias.data -= 1 # Make the initial values generally small
-            layers.append(layer)
-            layers.append(nn.Sigmoid())  # output in 0..1
-            if i < num_layers-1:
-                layers.append(self.dropout)
+    @staticmethod
+    def make_outflow_layer(hidden_dim, output_dim):
+        layer = nn.Linear(hidden_dim, output_dim)
+        layer.bias.data -= 1  # Make the initial values generally small
+        layers = [layer, nn.Sigmoid()]  # output in 0..1
+        return nn.Sequential(*layers)
 
+    @staticmethod
+    def make_inflow_layer(hidden_dim, output_dim):
+        layer = nn.Linear(hidden_dim, output_dim)
+        layer.bias.data -= 1  # Make the initial values generally small
+        layers = [layer]  #  , nn.Softmax()]  # output in 0..1
         return nn.Sequential(*layers)
 
     def init_stores(self, batch_size):
@@ -64,19 +73,28 @@ class HydModelNet(nn.Module):
 
         self.init_stores(batch_size)
 
+        self.inflowlog = np.zeros((steps, self.stores.shape[1]+1))
+        self.outflowlog = np.zeros((steps, self.store_outflow_dim))
+
         for i in range(steps):
             inputs = torch.cat((hyd_input[i, :, :], self.stores), 1)
-            a = self.inflow(inputs)
+            outputs = self.flownet(inputs)
+            a = self.inflow_layer(outputs)
             a = nn.Softmax()(a)  # a is b x stores
             if a.min() < 0 or a.max() > 1:
                 raise Exception("Relative inflow flux outside [0,1]\n" + str(a))
+
+            self.inflowlog[i, :] = a[0, :].detach()
 
             rain_distn = a[:, 1:] * rain[i, :].unsqueeze(1)  # (b x stores) . (b x 1)
             #print('a0=' + str(a[0, :]))
             #print('rain[i, :].unsqueeze(1)=' + str(rain[i, 0]))
             #print('rain_distn=' + str(rain_distn[0, :]))
             self.stores = self.stores + rain_distn  # stores is b x s
-            b = self.outflow(inputs)  # b x s+
+
+            #b = self.outflow(inputs)  # b x s+
+            b = self.outflow_layer(outputs)
+            self.outflowlog[i, :] = b[0, :].detach()
 
             if b.min() < 0 or b.max() > 1:
                 raise Exception("Relative outflow flux outside [0,1]\n" + str(b))
