@@ -51,7 +51,7 @@ class HydModelNet(nn.Module):
     def make_inflow_layer(hidden_dim, output_dim):
         layer = nn.Linear(hidden_dim, output_dim)
         layer.bias.data -= 1  # Make the initial values generally small
-        layers = [layer]  #  , nn.Softmax()]  # output in 0..1
+        layers = [layer, nn.Softmax()]  # output in 0..1
         return nn.Sequential(*layers)
 
     def init_stores(self, batch_size):
@@ -77,10 +77,10 @@ class HydModelNet(nn.Module):
         self.outflowlog = np.zeros((steps, self.store_outflow_dim))
 
         for i in range(steps):
-            inputs = torch.cat((hyd_input[i, :, :], self.stores), 1)
+            inputs = torch.cat((hyd_input[i, :, :], 0.01*self.stores), 1)
             outputs = self.flownet(inputs)
             a = self.inflow_layer(outputs)
-            a = nn.Softmax()(a)  # a is b x stores
+            #a = nn.Softmax()(a)  # a is b x stores
             if a.min() < 0 or a.max() > 1:
                 raise Exception("Relative inflow flux outside [0,1]\n" + str(a))
 

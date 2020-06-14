@@ -392,8 +392,7 @@ def train_decoder_only_fakedata(decoder: HydModelNet, input_size, store_size, ba
         #inputs = torch.cat((hyd_input[i, :, :], self.stores), 1)
         outputs = decoder.flownet(inputs_no_flow)
         a = decoder.inflow_layer(outputs)  # a is b x stores
-        #included in inflow_layer
-        a = nn.Softmax()(a)
+        #included in inflow_layer a = nn.Softmax()(a)
         expected_a = torch.zeros((batch_size, store_size+1)).double()
 
         b = decoder.outflow_layer(outputs)  # b x s+
@@ -707,7 +706,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
-        = load_inputs(subsample_data=50, years_per_sample=2, batch_size=batch_size)
+        = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
