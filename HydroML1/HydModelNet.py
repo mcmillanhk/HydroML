@@ -36,8 +36,8 @@ class HydModelNet(nn.Module):
             #this_output_dim = hidden_dim if i < num_layers-1 else output_dim
             layers.append(nn.Linear(this_input_dim, hidden_dim))
             layers.append(nn.ReLU())
-            if i < num_layers-1:
-                layers.append(self.dropout)
+            #if i < num_layers-1:
+            layers.append(self.dropout)
         return nn.Sequential(*layers)
 
     @staticmethod

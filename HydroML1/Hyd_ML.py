@@ -506,8 +506,8 @@ def make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp, i
 #Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, decoder_indices,
                           model_store_path, model, hyd_data_labels, encoder_type):
-    coupled_learning_rate = 0.0003
-    output_epochs = 25
+    coupled_learning_rate = 0.0001
+    output_epochs = 50
 
     criterion = nn.SmoothL1Loss()  #  nn.MSELoss()
     params = list(decoder.parameters())
@@ -524,6 +524,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     for epoch in range(output_epochs):
         restricted_input = False
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+            decoder.train()
 
             restricted_input = False  # epoch == 0
             flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
@@ -551,7 +552,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 #fig.canvas.draw()
 
                 l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
-                l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), label='GT flow', linewidth=0.5)  #Batch 0
+                l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), ':', label='GT flow', linewidth=0.5)  #Batch 0
                 ax_input.set_ylim(0, flow[:, 0].detach().numpy().max()*1.75)
                 rain = -hyd_data[0, idx_rain, :]  # b x i x t
                 ax_rain = ax_input.twinx()
@@ -579,7 +580,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
                 fig.show()
 
-        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(validate_loader):
+        decoder.eval()
+        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
             flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
                                                 decoder_indices, hyd_data_labels, encoder_type)
             _, loss = compute_loss(criterion, flow, hyd_data, outputs)
@@ -712,7 +714,8 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\7-2headed-dropout\\'
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\8-2headed-dropout-fixed\\'
+    os.mkdir(model_store_path)
 
     encoder_type = EncType.NoEncoder
     encoding_num_layers = 2
