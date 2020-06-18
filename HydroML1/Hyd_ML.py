@@ -506,7 +506,7 @@ def make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp, i
 #Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, decoder_indices,
                           model_store_path, model, hyd_data_labels, encoder_type):
-    coupled_learning_rate = 0.0001
+    coupled_learning_rate = 0.00002
     output_epochs = 50
 
     criterion = nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -543,6 +543,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
 
             if (i + 1) % 50 == total_step % 50:
+
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error, decimals=3))))
@@ -552,7 +553,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 #fig.canvas.draw()
 
                 l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
-                l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), ':', label='GT flow', linewidth=0.5)  #Batch 0
+                l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), '-', label='GT flow', linewidth=0.5)  #Batch 0
                 ax_input.set_ylim(0, flow[:, 0].detach().numpy().max()*1.75)
                 rain = -hyd_data[0, idx_rain, :]  # b x i x t
                 ax_rain = ax_input.twinx()
@@ -581,12 +582,17 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 fig.show()
 
         decoder.eval()
-        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+        temp_validate_loss_list=[]
+        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(validate_loader):
             flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
                                                 decoder_indices, hyd_data_labels, encoder_type)
             _, loss = compute_loss(criterion, flow, hyd_data, outputs)
-            while len(validate_loss_list) < len(loss_list):
-                validate_loss_list.append(loss.item())
+            temp_validate_loss_list.append(loss.item())
+            print(f'Validation loss {i} = {loss.item()}'
+                  .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
+                          str(np.around(error, decimals=3))))
+        while len(validate_loss_list) < len(loss_list):
+            validate_loss_list.extend(temp_validate_loss_list)
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
@@ -705,7 +711,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 
 def train_test_everything():
-    batch_size = 20
+    batch_size = 40
 
     train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
         = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
@@ -714,8 +720,9 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\8-2headed-dropout-fixed\\'
-    os.mkdir(model_store_path)
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\10-moreneurons\\'
+    if not os.path.exists(model_store_path):
+        os.mkdir(model_store_path)
 
     encoder_type = EncType.NoEncoder
     encoding_num_layers = 2
