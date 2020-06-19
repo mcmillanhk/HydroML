@@ -342,7 +342,7 @@ def setup_encoder_decoder(encoder_input_dim, decoder_input_dim, pretrained_encod
                          num_layers=encoder_layers, encoding_dim=encoding_dim).double()
 
     decoder_input_dim = decoder_input_dim + encoding_dim - 1  # -1 for flow
-    decoder_hidden_dim = 25
+    decoder_hidden_dim = 100
     output_dim = 1
     output_layers = 2
 
@@ -506,7 +506,7 @@ def make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp, i
 #Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, decoder_indices,
                           model_store_path, model, hyd_data_labels, encoder_type):
-    coupled_learning_rate = 0.00002
+    coupled_learning_rate = 0.000005
     output_epochs = 50
 
     criterion = nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -524,7 +524,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     for epoch in range(output_epochs):
         restricted_input = False
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
-            decoder.train()
+            if epoch < output_epochs-1:
+                decoder.train()
 
             restricted_input = False  # epoch == 0
             flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
@@ -720,7 +721,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\10-moreneurons\\'
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\11-reducelr\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
