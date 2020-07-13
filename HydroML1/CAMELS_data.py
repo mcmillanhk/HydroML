@@ -78,9 +78,9 @@ class CamelsDataset(Dataset):
         self.years_per_sample = years_per_sample
 
         """number of samples depends on years/sample. 35 years total; use up to 34 as 35 has a lot of missing data"""
-        self.num_sites = len(self.signatures_frame)
-        self.num_samples_per_site = math.floor(34 / self.years_per_sample)
-        self.num_samples = self.num_sites * self.num_samples_per_site
+        num_sites = len(self.signatures_frame)
+        #self.num_samples_per_site = math.floor(34 / self.years_per_sample)
+        #self.num_samples = self.num_sites * self.num_samples_per_site
 
         """Save areas in order to later convert flow data to mm"""
         root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
@@ -103,7 +103,7 @@ class CamelsDataset(Dataset):
                                                "dayl_std", "prcp_std", "srad_std",
                                                "swe_std",
                                                "tmax_std", "tmin_std", "vp_std"])
-        runningtotaltmp = 0
+        self.num_samples = 0
         for idx_site in range(max(int(self.num_sites/subsample_data), 1)):  #Load less sites
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
@@ -111,13 +111,14 @@ class CamelsDataset(Dataset):
             flow_data_name = os.path.join(self.root_dir_flow, flow_file)
             flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
                                     names=["year", "month", "day", "flow(cfs)", "qc"])
-            climate_file = str(self.signatures_frame.iloc[idx_site, 0]) + '_lump_cida_forcing_leap.txt'
-            climate_data_name = os.path.join(self.root_dir_climate, climate_file)
-            climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
-                                       usecols=[0, 1, 2, 3, 4, 5, 6, 7],
-                                       parse_dates=True,
-                                       names=["date", "dayl(s)", "prcp(mm/day)", "srad(W / m2)", "swe(mm)",
-                                              "tmax(C)", "tmin(C)", "vp(Pa)"])
+
+            #climate_file = str(self.signatures_frame.iloc[idx_site, 0]) + '_lump_cida_forcing_leap.txt'
+            #climate_data_name = os.path.join(self.root_dir_climate, climate_file)
+            #climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
+            #                           usecols=[0, 1, 2, 3, 4, 5, 6, 7],
+            #                           parse_dates=True,
+            #                           names=["date", "dayl(s)", "prcp(mm/day)", "srad(W / m2)", "swe(mm)",
+            #                                  "tmax(C)", "tmin(C)", "vp(Pa)"])
 
             #flow_data = flow_data[flow_data.qc != 'M']
             """Missing data label converted to 0/1"""
@@ -142,9 +143,9 @@ class CamelsDataset(Dataset):
             numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
             #except: print("break")
 
-            runningtotaltmp += numsamplestmp
+            self.num_samples += numsamplestmp
 
-            self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]]["RunningTotal"] = runningtotaltmp
+            self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]]["RunningTotal"] = self.num_samples
 
         sigs = {
             #'gauge_id': 1,
@@ -176,7 +177,7 @@ class CamelsDataset(Dataset):
             'vp(Pa)': 0.001,
         }
 
-        self.num_samples = runningtotaltmp
+        # = runningtotaltmp
 
         self.all_csv_files = {}
 
