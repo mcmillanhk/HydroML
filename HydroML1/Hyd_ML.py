@@ -862,11 +862,11 @@ def train_test_everything():
     decoder = train_decoder_only_fakedata(decoder, train_loader, input_size, store_dim, batch_size, index_temp_minmax,
                                           0.1)
     #return
-    decoder = train_decoder_only_realdata(decoder, input_size, store_dim, batch_size, index_temp_minmax, 0.1)
+    #decoder = train_decoder_only_realdata(decoder, input_size, store_dim, batch_size, index_temp_minmax, 0.1)
     train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices=encoder_indices,
                           decoder_indices=decoder_indices,
                           model_store_path=model_store_path, model=decoder_model_type, hyd_data_labels=hyd_data_labels,
-                          encoder_type=encoder_type, index_temp_minmax=index_temp_minmax)
+                          encoder_type=encoder_type)
 
 
 train_test_everything()
