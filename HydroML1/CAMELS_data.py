@@ -43,7 +43,7 @@ class CamelsDataset(Dataset):
 
         self.sigs_as_input = sigs_as_input
 
-        maxgoodyear = 2013  # Don't use any years after this
+        #maxgoodyear = 2013  # Don't use any years after this
 
         self.attrib_files = None
         for file in csv_file_attrib:
@@ -335,7 +335,7 @@ class CamelsDataset(Dataset):
                 hyd_data[key] = value.reset_index(drop=True)[0]
                 #self.check_dataframe(hyd_data)
 
-        self.check_dataframe(hyd_data)
+        #self.check_dataframe(hyd_data)
 
         """Get signatures related to site"""
         self.sig_labels = [label.strip() for label in signatures.columns]
