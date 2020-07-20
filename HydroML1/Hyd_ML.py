@@ -715,7 +715,7 @@ def train_test_everything():
     batch_size = 40
 
     train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
-        = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
+        = load_inputs(subsample_data=10, years_per_sample=2, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)

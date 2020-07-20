@@ -93,60 +93,6 @@ class CamelsDataset(Dataset):
         area_data.set_index('gauge_id', inplace=True)
         self.area_data = area_data
 
-        """Check amount of flow data for each site and build a table of this"""
-        self.siteyears = pd.DataFrame(index=self.signatures_frame.iloc[:, 0],
-                                      columns=['MinYear', 'MaxYear', 'NumYears', 'NumSamples', 'RunningTotal',
-                                               'Flowmean_mmd', 'flow_std',
-                                               "dayl_av", "prcp_av", "srad_av",
-                                               "swe_av",
-                                               "tmax_av", "tmin_av", "vp_av",
-                                               "dayl_std", "prcp_std", "srad_std",
-                                               "swe_std",
-                                               "tmax_std", "tmin_std", "vp_std"])
-        self.num_samples = 0
-        for idx_site in range(max(int(self.num_sites/subsample_data), 1)):  #Load less sites
-            """Read in climate and flow data for this site"""
-            gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
-            flow_file = gauge_id + '_streamflow_qc.txt'
-            flow_data_name = os.path.join(self.root_dir_flow, flow_file)
-            flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
-                                    names=["year", "month", "day", "flow(cfs)", "qc"])
-
-            #climate_file = str(self.signatures_frame.iloc[idx_site, 0]) + '_lump_cida_forcing_leap.txt'
-            #climate_data_name = os.path.join(self.root_dir_climate, climate_file)
-            #climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
-            #                           usecols=[0, 1, 2, 3, 4, 5, 6, 7],
-            #                           parse_dates=True,
-            #                           names=["date", "dayl(s)", "prcp(mm/day)", "srad(W / m2)", "swe(mm)",
-            #                                  "tmax(C)", "tmin(C)", "vp(Pa)"])
-
-            #flow_data = flow_data[flow_data.qc != 'M']
-            """Missing data label converted to 0/1"""
-            d = {'A': 0, 'A:e': 0, 'M': 1}
-            flow_data["qc"] = flow_data["qc"].map(d)
-            flow_data["qc"][np.isnan(flow_data["qc"])] = 1
-            flow_data["qc"] = flow_data["qc"].cumsum()  # accumulate
-            # first_bad_sample = flow_data[flow_data["qc"] == 1].iloc[0]
-            flow_data = flow_data[flow_data.qc == 0]
-
-            """Find first/last year of data"""
-            minyeartmp = flow_data[(flow_data["month"] == 1) & (flow_data["day"] == 1)].min(axis=0)["year"]
-            if np.isnan(minyeartmp):
-                minyeartmp = -1
-            maxyeartmp = flow_data[(flow_data["month"] == 12) & (flow_data["day"] == 30)].max(axis=0)["year"]
-            if np.isnan(maxyeartmp):
-                maxyeartmp = minyeartmp
-            maxyeartmp = min(maxyeartmp, maxgoodyear)
-            numyearstmp = (maxyeartmp-minyeartmp+1)
-            #numsamplestmp=0
-            #try:
-            numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
-            #except: print("break")
-
-            self.num_samples += numsamplestmp
-
-            self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]]["RunningTotal"] = self.num_samples
-
         sigs = {
             #'gauge_id': 1,
             'q_mean': 1,
@@ -168,7 +114,7 @@ class CamelsDataset(Dataset):
             self.signatures_frame[name] = self.signatures_frame[name].transform(lambda x: x * normalizer)
 
         self.climate_norm = {
-            'dayl(s)':0.00002,
+            'dayl(s)': 0.00002,
             'prcp(mm/day)': 1,
             'srad(W/m2)': 0.005,
             'swe(mm)': 1,
@@ -177,8 +123,118 @@ class CamelsDataset(Dataset):
             'vp(Pa)': 0.001,
         }
 
-        # = runningtotaltmp
+        """Check amount of flow data for each site and build a table of this"""
+        self.siteyears = pd.DataFrame(index=self.signatures_frame.iloc[:, 0],
+                                      columns=['MinYear', 'MaxYear', 'NumYears', 'NumSamples', 'RunningTotal',
+                                               'Flowmean_mmd', 'flow_std',
+                                               "dayl_av", "prcp_av", "srad_av",
+                                               "swe_av",
+                                               "tmax_av", "tmin_av", "vp_av",
+                                               "dayl_std", "prcp_std", "srad_std",
+                                               "swe_std",
+                                               "tmax_std", "tmin_std", "vp_std"])
+        self.num_samples = 0
+        for idx_site in range(max(int(num_sites/subsample_data), 1)):  #Load less sites
+            """Read in climate and flow data for this site"""
+            gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
+            flow_file = gauge_id + '_streamflow_qc.txt'
+            flow_data_name = os.path.join(self.root_dir_flow, flow_file)
+            flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
+                                    names=["year", "month", "day", "flow(cfs)", "qc"])
 
+            climate_file = str(self.signatures_frame.iloc[idx_site, 0]) + '_lump_cida_forcing_leap.txt'
+            climate_data_name = os.path.join(self.root_dir_climate, climate_file)
+            climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
+                                       usecols=[0, 1, 2, 3, 4, 5, 6, 7],
+                                       parse_dates=True,
+                                       names=["date", "dayl(s)", "prcp(mm/day)", "srad(W / m2)", "swe(mm)",
+                                              "tmax(C)", "tmin(C)", "vp(Pa)"])
+            climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H')  # - pd.Timedelta('12 hours')
+            climate_data['date'] = climate_data['date'].apply(lambda x: x.date())
+
+            #flow_data = flow_data[flow_data.qc != 'M']
+            """Missing data label converted to 0/1"""
+            d = {'A': 0, 'A:e': 0, 'M': 1}
+            flow_data["qc"] = flow_data["qc"].map(d)
+            flow_data["qc"][np.isnan(flow_data["qc"])] = 1
+            flow_data["qc"] = flow_data["qc"].cumsum()  # accumulate
+            # first_bad_sample = flow_data[flow_data["qc"] == 1].iloc[0]
+            #old method: discard from 1st bad sample flow_data = flow_data[flow_data.qc == 0]
+
+            # Iterate over water years
+            water_year_month = 10
+            water_year_day = 1
+            select_water_year = (flow_data["month"] == water_year_month) & (flow_data["day"] == water_year_day)
+            water_years = flow_data[select_water_year]
+            indices = flow_data.index[select_water_year]
+
+            if water_years.shape[0] < years_per_sample:
+                continue
+
+            self.all_items = []
+
+            for year_idx in range(water_years.shape[0]-years_per_sample):
+                record_start = water_years.iloc[year_idx]
+                record_end = water_years.iloc[year_idx+years_per_sample]
+                if record_end['qc'] > record_start['qc']:
+                    continue  # There's bad data in this interval
+
+                flow_data_subset = flow_data.iloc[list(range(indices[year_idx], indices[year_idx+years_per_sample]))]\
+                    .reset_index(drop=True)
+                #print(flow_data_subset.columns)
+                flow_date_start = pd.datetime(int(record_start['year']), int(record_start['month']),
+                                              int(record_start['day'])).date()
+                flow_date_end = pd.datetime(int(record_end['year']), int(record_end['month']),
+                                            int(record_end['day'])).date()
+
+                #flow_date_start + pd.Timedelta(years_per_sample, 'Y')
+
+                climate_data_subset = climate_data.loc[(climate_data['date'] >= flow_date_start) &
+                                                       (climate_data['date'] < flow_date_end)].reset_index(drop=True)
+                #climate_data_subset = climate_data.iloc[list(range(indices[year_idx], indices[year_idx+years_per_sample]))]\
+                #    .reset_index(drop=True)
+
+                if climate_data_subset.shape[0] != flow_data_subset.shape[0]:
+                    print("Missing climate data")
+                    continue
+
+                if climate_data_subset.date[0] != flow_date_start:
+                    raise Exception("Flow data start doesn't match climate data start")
+
+                hyd_data = pd.concat([flow_data_subset.drop(['year', 'month', 'day'], axis=1),
+                                      climate_data_subset.drop(['date'], axis=1)], axis=1, join='inner')
+
+                length_days = 365*years_per_sample
+                if hyd_data.shape[0] > length_days:
+                    hyd_data.drop(hyd_data.tail(hyd_data.shape[0] - length_days).index, inplace=True)
+
+                self.all_items.append(self.load_hyddata(gauge_id, flow_date_start, hyd_data))
+
+                self.num_samples += 1
+                #self.siteyears.append({'gauge_id': gauge_id,
+                #                       'index_in_flow':
+                #                       })
+
+            """Find first/last year of data""
+            minyeartmp = flow_data[(flow_data["month"] == 1) & (flow_data["day"] == 1)].min(axis=0)["year"]
+            if np.isnan(minyeartmp):
+                minyeartmp = -1
+            maxyeartmp = flow_data[(flow_data["month"] == 12) & (flow_data["day"] == 30)].max(axis=0)["year"]
+            if np.isnan(maxyeartmp):
+                maxyeartmp = minyeartmp
+            maxyeartmp = min(maxyeartmp, maxgoodyear)
+            numyearstmp = (maxyeartmp-minyeartmp+1)
+            #numsamplestmp=0
+            #try:
+            numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
+            #except: print("break")
+
+            self.num_samples += numsamplestmp
+
+            self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]]["RunningTotal"] = self.num_samples"""
+
+        # = runningtotaltmp
+        """
         self.all_csv_files = {}
 
         self.load_all = True
@@ -186,7 +242,7 @@ class CamelsDataset(Dataset):
             #pool = Pool(4)
             self.all_items = [self.load_item(i) for i in range(0, self.num_samples)]
             #self.all_items = pool.map(self.load_item, range(0, self.num_samples))
-            self.all_csv_files = None
+            self.all_csv_files = None"""
 
     def __len__(self):
 
@@ -197,6 +253,10 @@ class CamelsDataset(Dataset):
             return self.all_items[idx]
         else:
             return self.load_item(idx)
+
+    def check_dataframe(self, hyd_data):
+        if hyd_data.isnull().any().any() or hyd_data.isin([-999]).any().any():
+            raise Exception('nan in hyd data')
 
     def load_item(self, idx):
         print('load ', idx, '/', self.num_samples)
@@ -211,7 +271,7 @@ class CamelsDataset(Dataset):
         """Get file names for climate and flow"""
         gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
         climate_data, flow_data, flow_data_ymd = self.load_flow_climate_csv(gauge_id)
-
+        raise Exception("Sort out water year dates")
         minyeartmp = flow_data_ymd[(flow_data_ymd["month"] == 1) & (flow_data_ymd["day"] == 1)].min(axis=0)["year"]
         minyearidx = minyeartmp + idx_within_site * self.years_per_sample
         #  Find years for flow data
@@ -226,8 +286,6 @@ class CamelsDataset(Dataset):
 
         """Normalize flow data"""
         """First to mm/d"""
-        flow_area = self.area_data.loc[gauge_id, 'area_gages2']
-        flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * cfs2mm / flow_area
 
         """if self.normalize_inputs:
             ""Then normalize""
@@ -240,33 +298,47 @@ class CamelsDataset(Dataset):
 
         print("Av flow=" + str(np.mean(flow_data["flow(cfs)"])))
         print("Av rain=" + str(np.mean(climate_data["prcp(mm/day)"])))
-        flow_data = flow_data.drop('qc', axis=1)
+
+        #self.check_dataframe(flow_data)
+        #self.check_dataframe(climate_data)
 
         """Merge climate and flow into one array"""
         hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date'  #, 'swe(mm)'
-                                                                                 ], axis=1)],
-                             axis=1, join='inner')
+                                                                                 ], axis=1)], axis=1, join='inner')
+        self.check_dataframe(hyd_data)
+
+        return self.load_hyddata(gauge_id, flow_date_start, hyd_data)
+
+    def load_hyddata(self, gauge_id, flow_date_start, hyd_data):
+        flow_area = self.area_data.loc[gauge_id, 'area_gages2']
+        hyd_data["flow(cfs)"] = hyd_data["flow(cfs)"] * cfs2mm / flow_area
+
+        hyd_data = hyd_data.drop('qc', axis=1)
+        #self.check_dataframe(hyd_data)
 
         #print('Load ' + gauge_id)
         attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == int(gauge_id)]
         for key in attribs.columns:
             if key != 'gauge_id':
                 hyd_data[key] = attribs[key].iloc[0]
+        #self.check_dataframe(hyd_data)
 
-        signatures = self.signatures_frame.iloc[idx_site, 1:]
+        signatures = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].drop('gauge_id', axis=1)
+        self.check_dataframe(signatures)
+
         if self.sigs_as_input:
             #for key in signatures.columns:
             for key, value in signatures.items():
                 if key == 'gauge_id':
                     raise Exception("Should have been removed")
-                hyd_data[key] = value
+                hyd_data[key] = value.reset_index(drop=True)[0]
+                #self.check_dataframe(hyd_data)
 
-        if hyd_data.isnull().any().any() or hyd_data.isin([-999]).any().any():
-            raise Exception('nan in hyd data')
+        self.check_dataframe(hyd_data)
 
         """Get signatures related to site"""
-        self.sig_labels = [label.strip() for label in signatures.axes[0]]
-        signatures = np.array([signatures])
+        self.sig_labels = [label.strip() for label in signatures.columns]
+        signatures = np.array(signatures)
         signatures = signatures.astype('double').reshape(-1, 1)
         if np.isnan(signatures).any() or signatures[signatures == -999].any():
             raise Exception('nan in signatures')
