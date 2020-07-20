@@ -134,7 +134,10 @@ class CamelsDataset(Dataset):
                                                "swe_std",
                                                "tmax_std", "tmin_std", "vp_std"])
         self.num_samples = 0
-        for idx_site in range(max(int(num_sites/subsample_data), 1)):  #Load less sites
+        self.all_items = []
+        num_to_load = max(int(num_sites / subsample_data), 1)
+        for idx_site in range(num_to_load):
+            print(f"Load {idx_site}/{num_to_load}")
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
             flow_file = gauge_id + '_streamflow_qc.txt'
@@ -170,8 +173,6 @@ class CamelsDataset(Dataset):
 
             if water_years.shape[0] < years_per_sample:
                 continue
-
-            self.all_items = []
 
             for year_idx in range(water_years.shape[0]-years_per_sample):
                 record_start = water_years.iloc[year_idx]
@@ -210,7 +211,7 @@ class CamelsDataset(Dataset):
 
                 self.all_items.append(self.load_hyddata(gauge_id, flow_date_start, hyd_data))
 
-                self.num_samples += 1
+                #self.num_samples += 1
                 #self.siteyears.append({'gauge_id': gauge_id,
                 #                       'index_in_flow':
                 #                       })
@@ -246,10 +247,10 @@ class CamelsDataset(Dataset):
 
     def __len__(self):
 
-        return self.num_samples
+        return len(self.all_items)
 
     def __getitem__(self, idx):
-        if self.load_all:
+        if len(self.all_items) > 0:
             return self.all_items[idx]
         else:
             return self.load_item(idx)
