@@ -116,7 +116,7 @@ class CamelsDataset(Dataset):
         self.climate_norm = {
             'dayl(s)': 0.00002,
             'prcp(mm/day)': 1,
-            'srad(W/m2)': 0.005,
+            'srad(W / m2)': 0.005,
             'swe(mm)': 1,
             'tmax(C)': 0.1,
             'tmin(C)': 0.1,
@@ -154,6 +154,9 @@ class CamelsDataset(Dataset):
                                               "tmax(C)", "tmin(C)", "vp(Pa)"])
             climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H')  # - pd.Timedelta('12 hours')
             climate_data['date'] = climate_data['date'].apply(lambda x: x.date())
+
+            for name, normalizer in self.climate_norm.items():
+                climate_data[name] = climate_data[name].transform(lambda x: x * normalizer)
 
             #flow_data = flow_data[flow_data.qc != 'M']
             """Missing data label converted to 0/1"""
