@@ -1,13 +1,13 @@
-import torch
-import torch.nn as nn
+#import torch
+#import torch.nn as nn
 from torch.utils.data import DataLoader
-import numpy as np
+#import numpy as np
 import CAMELS_data as Cd
 import os
 import math
 import matplotlib.pyplot as plt
 import time
-from HydModelNet import HydModelNet
+from HydModelNet import *
 from Util import *
 import random
 
@@ -391,9 +391,12 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, input_size, 
         if hyd_data.shape[0] < batch_size:
             continue
 
+        print(f"Batch {i} of {runs}")
+
         scale_stores = i > runs/2
         numbers = list(range(hyd_data.shape[2]))
         random.shuffle(numbers)
+        numbers = numbers[1:20]
         for sample in numbers:
             inputs, inputs_no_flow = make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp,
                                                       inflow_inputs, input_size, hyd_data[:, :, sample])
@@ -735,7 +738,7 @@ def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, hyd_data, encode
     if decoder_indices is not None:
         not_decoder_indices = list(set(range(hyd_data.shape[2])) - set(decoder_indices))
         hyd_data[:, :, not_decoder_indices] = 0
-    hyd_data = hyd_data[:, :, 1:]  # drop flow [730 20 39]
+    #hyd_data = hyd_data[:, :, 1:]  # Don't drop flow; will be dropped after setting baseflow [730 20 39]
     outputs = decoder(hyd_data)  # b x t [expect
     if torch.max(np.isnan(outputs.data)) == 1:
         raise Exception('nan generated')
@@ -802,7 +805,7 @@ def train_test_everything():
     batch_size = 40
 
     train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
-        = load_inputs(subsample_data=200, years_per_sample=2, batch_size=batch_size)
+        = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)

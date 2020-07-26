@@ -4,6 +4,11 @@ from Util import *
 import numpy as np
 
 
+class Indices:
+    SLOW_STORE = 0
+    #SNOW_STORE = last store
+
+
 class HydModelNet(nn.Module):
 
     def __init__(self, input_dim, hidden_dim, store_dim,
@@ -56,15 +61,22 @@ class HydModelNet(nn.Module):
 
     def init_stores(self, batch_size):
         self.stores = torch.zeros([batch_size, self.store_dim]).double()
-        self.stores[:, 0] = 1000
+        self.stores[:, Indices.SLOW_STORE] = 0
         self.stores[:, 1] = 100  # Start with some non-empty stores (deep, snow)
+
+    def correct_init_baseflow(self, flow, store_coeff):
+        baseflow = np.percentile(flow, 25, axis=0)  # flow is t x b
+        # Want store_coeff*slowstore = baseflow
+        self.stores[:, Indices.SLOW_STORE] = torch.from_numpy(baseflow / np.maximum(store_coeff.detach().numpy(), 0.00001))
+        print(f"Init slow store {self.stores[0, Indices.SLOW_STORE]} from baseflow {baseflow[0]}/coeff {store_coeff[0]}")
 
     #def init_hidden(self):
         # This is what we'll initialise our hidden state as
         #return (torch.zeros(self.num_layers, self.batch_size, self.hidden_dim),
         #        torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
-
     def forward(self, hyd_input):  # hyd_input is t x b x i
+        flow = hyd_input[:, :, 0]
+        hyd_input = hyd_input[:, :, 1:]
         idx_rain = get_indices(['prcp(mm/day)'], self.hyd_data_labels)[0]
         rain = hyd_input[:, :, idx_rain-1]  # rain is t x b
         steps = hyd_input.shape[0]
@@ -114,7 +126,6 @@ class HydModelNet(nn.Module):
                 self.stores = self.stores - escape
 
             b_flow = b[:, (-num_stores):]
-
             flow_distn = b_flow * self.stores
             self.stores = self.stores - flow_distn
 
@@ -122,6 +133,9 @@ class HydModelNet(nn.Module):
                 raise Exception("Negative store\n" + str(self.stores))
 
             flows[i, :] = flow_distn.sum(1)
+
+            if i == 0:
+                self.correct_init_baseflow(flow, b_flow[:, Indices.SLOW_STORE])
 
         if flows.min() < 0:
             raise Exception("Negative flow")
