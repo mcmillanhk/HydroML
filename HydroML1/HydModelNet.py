@@ -48,14 +48,14 @@ class HydModelNet(nn.Module):
     @staticmethod
     def make_outflow_layer(hidden_dim, output_dim):
         layer = nn.Linear(hidden_dim, output_dim)
-        layer.bias.data -= 1  # Make the initial values generally small
+        layer.bias.data -= 3  # Make the initial values generally small
         layers = [layer, nn.Sigmoid()]  # output in 0..1
         return nn.Sequential(*layers)
 
     @staticmethod
     def make_inflow_layer(hidden_dim, output_dim):
         layer = nn.Linear(hidden_dim, output_dim)
-        layer.bias.data -= 1  # Make the initial values generally small
+        #layer.bias.data -= 1  # Make the initial values generally small
         layers = [layer, nn.Softmax()]  # output in 0..1
         return nn.Sequential(*layers)
 
@@ -135,6 +135,7 @@ class HydModelNet(nn.Module):
             flows[i, :] = flow_distn.sum(1)
 
             if i == 0:
+                print(f"b_flow={b_flow[0,:]} stores={self.stores[0,:]}")
                 self.correct_init_baseflow(flow, b_flow[:, Indices.SLOW_STORE])
 
         if flows.min() < 0:
