@@ -41,8 +41,8 @@ class HydModelNet(nn.Module):
             #this_output_dim = hidden_dim if i < num_layers-1 else output_dim
             layers.append(nn.Linear(this_input_dim, hidden_dim))
             layers.append(nn.ReLU())
-            #if i < num_layers-1:
-            layers.append(self.dropout)
+            if i < num_layers-1:
+                layers.append(self.dropout)
         return nn.Sequential(*layers)
 
     @staticmethod
@@ -62,7 +62,7 @@ class HydModelNet(nn.Module):
     def init_stores(self, batch_size):
         self.stores = torch.zeros([batch_size, self.store_dim]).double()
         self.stores[:, Indices.SLOW_STORE] = 0
-        self.stores[:, 1] = 100  # Start with some non-empty stores (deep, snow)
+        self.stores[:, 1] = 1  # Start with some non-empty stores (deep, snow)
 
     def correct_init_baseflow(self, flow, store_coeff):
         baseflow = np.percentile(flow, 25, axis=0)  # flow is t x b

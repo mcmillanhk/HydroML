@@ -811,7 +811,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\12-hydyear-realfakedata\\'
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\13-hydyear-realfakedata-lessdropout\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
