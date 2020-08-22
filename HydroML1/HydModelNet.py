@@ -4,7 +4,7 @@ from Util import *
 import numpy as np
 
 
-class Indices:
+class Indices:  # TODO still hardcoded in expected_b code
     SLOW_STORE = 0
     #SNOW_STORE = last store
 

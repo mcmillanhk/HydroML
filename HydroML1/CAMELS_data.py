@@ -335,7 +335,10 @@ class CamelsDataset(Dataset):
             for key, value in signatures.items():
                 if key == 'gauge_id':
                     raise Exception("Should have been removed")
-                hyd_data[key] = value.reset_index(drop=True)[0]
+                val = value.reset_index(drop=True)[0]
+                # slow: hyd_data[key] = val
+                # also slow:
+                hyd_data.insert(len(hyd_data.columns), key, val)
                 #self.check_dataframe(hyd_data)
 
         #self.check_dataframe(hyd_data)

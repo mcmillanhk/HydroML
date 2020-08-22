@@ -408,8 +408,17 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, input_size, 
             expected_a = torch.zeros((batch_size, store_size+1)).double()
 
             b = decoder.outflow_layer(outputs)  # b x s+
-            expected_b = torch.zeros((batch_size, store_size*(store_size+2))).double() + 0.01
-            expected_b[:, (store_size*store_size):(store_size*(store_size+1))] = 0.2  # random?
+
+            snow_store_idx = store_size - 1
+            slow_store_idx = 0
+            slow_store_idx2 = 1
+            loss_idx_start = store_size * store_size
+            loss_idx_end = loss_idx_start + store_size
+            outflow_idx_start = store_size * (store_size + 1)
+            outflow_idx_end = outflow_idx_start + store_size
+
+            expected_b = torch.zeros((batch_size, store_size*(store_size+2))).double() + 0.001
+            expected_b[:, outflow_idx_start:outflow_idx_end] = 0.2  # random?
 
             for batch_idx in range(batch_size):
                 temp = (inputs[batch_idx, index_temp_minmax[0]] + inputs[batch_idx, index_temp_minmax[1]])*0.5/weight_temp
@@ -419,12 +428,10 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, input_size, 
                 expected_a[batch_idx, store_size] = snowfall
 
                 snowmelt = max(float(temp), 2)/50
-                snow_store_idx = store_size - 1
-                expected_b[batch_idx, store_size*store_size + snow_store_idx] = snowmelt
-                slow_store_idx = store_size * store_size
-                expected_b[batch_idx, slow_store_idx] = 0.001   # we really want this to be slow. Could start with -1 or
-                                                                # something
-                expected_b[batch_idx, slow_store_idx+1] = 0.001
+                expected_b[batch_idx, outflow_idx_start + snow_store_idx] = snowmelt
+                expected_b[batch_idx, outflow_idx_start + slow_store_idx] = 0.001   # we really want this to be slow. Could start with -1 or
+                                                                                    # something. And also all the other flows out of the slow store
+                expected_b[batch_idx, outflow_idx_start + slow_store_idx2] = 0.001
 
             loss = criterion(a, expected_a) + criterion(b, expected_b)
             loss_list.append(loss.item())
@@ -596,13 +603,22 @@ def pretrain_decoder(train_loader, decoder, model_store_path, index_temp_minmax)
 #Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices, decoder_indices,
                           model_store_path, model, hyd_data_labels, encoder_type):
-    coupled_learning_rate = 0.000005
+    coupled_learning_rate = 0.0001  #0.000005
     output_epochs = 50
 
     criterion = nn.SmoothL1Loss()  #  nn.MSELoss()
-    params = list(decoder.parameters())
+
+    #params = list(decoder.parameters())
+    #if encoder_type != EncType.NoEncoder:
+    #    params += list(encoder.parameters())
+
+    # Low weight decay on output layers
+    params = [{'params': decoder.flownet.parameters()},
+              {'params': decoder.inflow_layer.parameters(), 'weight_decay': 0*weight_decay},
+              {'params': decoder.outflow_layer.parameters(), 'weight_decay': 0*weight_decay}
+              ]
     if encoder_type != EncType.NoEncoder:
-        params += list(encoder.parameters())
+        params += {'params': list(encoder.parameters())}
 
     optimizer = torch.optim.Adam(params, lr=coupled_learning_rate, weight_decay=weight_decay)
 
@@ -802,7 +818,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 
 def train_test_everything():
-    batch_size = 40
+    batch_size = 20
 
     train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
         = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
@@ -811,7 +827,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\13-hydyear-realfakedata-lessdropout\\'
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\14-hydyear-realfakedata-low_wd_on_output\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
@@ -850,7 +866,6 @@ def train_test_everything():
                            num_layers=encoding_num_layers, encoding_dim=encoding_dim,
                            hidden_dim=encoding_hidden_dim,
                            num_sigs=num_sigs, batch_size=batch_size, encoder_indices=encoder_indices)
-
 
     encoder, decoder = setup_encoder_decoder(encoder_input_dim=encoder_input_dim, decoder_input_dim=input_dim,
                                              pretrained_encoder_path=pretrained_encoder_path,
