@@ -373,7 +373,7 @@ def setup_encoder_decoder(encoder_input_dim, decoder_input_dim, pretrained_encod
 
 def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, input_size, store_size, batch_size,
                                 index_temp_minmax, weight_temp):
-    coupled_learning_rate = 0.001
+    coupled_learning_rate = 0.0003
 
     criterion = nn.MSELoss()  #  nn.MSELoss()
     params = list(decoder.parameters())
@@ -396,7 +396,7 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, input_size, 
         scale_stores = i > runs/2
         numbers = list(range(hyd_data.shape[2]))
         random.shuffle(numbers)
-        numbers = numbers[:50]
+        numbers = numbers[:20]
         for sample in numbers:
             inputs, inputs_no_flow = make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp,
                                                       inflow_inputs, input_size, hyd_data[:, :, sample])
@@ -614,8 +614,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
     # Low weight decay on output layers
     params = [{'params': decoder.flownet.parameters()},
-              {'params': decoder.inflow_layer.parameters(), 'weight_decay': 0*weight_decay},
-              {'params': decoder.outflow_layer.parameters(), 'weight_decay': 0*weight_decay}
+              {'params': decoder.inflow_layer.parameters(), 'weight_decay': weight_decay},
+              {'params': decoder.outflow_layer.parameters(), 'weight_decay': weight_decay}
               ]
     if encoder_type != EncType.NoEncoder:
         params += {'params': list(encoder.parameters())}
@@ -827,7 +827,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\14-hydyear-realfakedata-low_wd_on_output\\'
+    model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 

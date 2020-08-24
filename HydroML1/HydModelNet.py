@@ -135,7 +135,7 @@ class HydModelNet(nn.Module):
             flows[i, :] = flow_distn.sum(1)
 
             if i == 0:
-                print(f"b_flow={b_flow[0,:]} stores={self.stores[0,:]}")
+                #print(f"b_flow={b_flow[0,:]} stores={self.stores[0,:]}")
                 self.correct_init_baseflow(flow, b_flow[:, Indices.SLOW_STORE])
 
         if flows.min() < 0:
