@@ -659,14 +659,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 ax_loss = fig.add_subplot(2, 2, 2)
                 #fig.canvas.draw()
 
-                l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  #Batch 0
-                l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), '-', label='GT flow', linewidth=0.5)  #Batch 0
-                ax_input.set_ylim(0, flow[:, 0].detach().numpy().max()*1.75)
-                rain = -hyd_data[0, idx_rain, :]  # b x i x t
-                ax_rain = ax_input.twinx()
-                l_rain, = ax_rain.plot(rain.detach().numpy(), color='b', label="Rain")  #Batch 0
-
-                ax_input.legend([l_model, l_gtflow, l_rain], ["Model", "GTFlow", "-Rain"], loc="upper right")
+                plot_model_flow_performance(ax_input, flow, hyd_data, idx_rain, outputs)
 
                 ax_loss.plot(acc_list, color='r')
                 ax_loss.plot(moving_average(acc_list), color='#AA0000')
@@ -698,11 +691,26 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             print(f'Validation loss {i} = {loss.item()}'
                   .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
                           str(np.around(error, decimals=3))))
+            fig = plt.figure(figsize=(18, 18))
+            ax_input = fig.add_subplot(1, 1, 1)
+            plot_model_flow_performance(ax_input, flow, hyd_data, idx_rain, outputs)
+            fig.show()
+
         while len(validate_loss_list) < len(loss_list):
             validate_loss_list.extend(temp_validate_loss_list)
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
+
+
+def plot_model_flow_performance(ax_input, flow, hyd_data, idx_rain, outputs):
+    l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  # Batch 0
+    l_gtflow, = ax_input.plot(flow[:, 0].detach().numpy(), '-', label='GT flow', linewidth=0.5)  # Batch 0
+    ax_input.set_ylim(0, flow[:, 0].detach().numpy().max() * 1.75)
+    rain = -hyd_data[0, idx_rain, :]  # b x i x t
+    ax_rain = ax_input.twinx()
+    l_rain, = ax_rain.plot(rain.detach().numpy(), color='b', label="Rain")  # Batch 0
+    ax_input.legend([l_model, l_gtflow, l_rain], ["Model", "GTFlow", "-Rain"], loc="upper right")
 
 
 def compute_loss(criterion, flow, hyd_data, outputs):
@@ -821,7 +829,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
-        = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
+        = load_inputs(subsample_data=20, years_per_sample=2, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
