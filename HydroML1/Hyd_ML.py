@@ -90,10 +90,10 @@ def moving_average(a, n=13):
 
 # Convolutional neural network (two convolutional layers)
 class ConvNet(nn.Module):
-    def __init__(self, num_sigs, years_per_sample):
+    def __init__(self, num_sigs, years_per_sample, encoder_input_dim):
         super(ConvNet, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv1d(8, 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
+            nn.Conv1d(encoder_input_dim, 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
             nn.ReLU())
         #   , nn.MaxPool1d(kernel_size=5, stride=5))
         self.layer2 = nn.Sequential(
@@ -105,7 +105,7 @@ class ConvNet(nn.Module):
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=5, stride=5))
         self.drop_out = nn.Dropout()
-        self.fc1 = nn.Linear(math.floor(((years_per_sample*365/4)/20)) * 16, 50)
+        self.fc1 = nn.Linear(math.floor(((int(years_per_sample)*365/4)/20)) * 16, 50)
         self.fc2 = nn.Linear(50, num_sigs)
 
     def forward(self, x):
@@ -174,19 +174,19 @@ class SimpleLSTM(nn.Module):
         return y_pred
 
 
-def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_path, num_layers, encoding_dim,
+def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretrained_encoder_path, num_layers, encoding_dim,
                        hidden_dim, batch_size, num_sigs, encoder_indices):
     # Hyperparameters
-    modeltype = 'LSTM'  # 'Conv'
+    #modeltype = 'LSTM'  # 'Conv'
     num_epochs = 2
     learning_rate = 0.00005  # 0.001 works well for the subset. So does .0001 (maybe too fast though?)
 
     shown = False
 
     #input_dim = 8 + len(attribs)
-    if modeltype == 'Conv':
-        model = ConvNet(num_sigs=num_sigs, years_per_sample=2)
-    elif modeltype == 'LSTM':
+    if encoder_type == EncType.CNNEncoder:
+        model = ConvNet(num_sigs=num_sigs, years_per_sample=2, encoder_input_dim=len(encoder_indices))
+    elif encoder_type == EncType.LSTMEncoder:
         model = SimpleLSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
                            num_layers=num_layers, encoding_dim=encoding_dim)
     else:
@@ -208,15 +208,18 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
             # Run the forward pass
             #hyd_data_labels = train_loader.hyd_data_labels
-            if modeltype == 'LSTM':
+            if True:
+                hyd_data = hyd_data[:, encoder_indices, :]
+
+            if encoder_type == EncType.LSTMEncoder:
                 model.hidden = model.init_hidden()
                 hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
 
-            if True:
-                hyd_data = hyd_data[:, :, encoder_indices]
-            elif epoch == 0:
-                hyd_data = only_rain(hyd_data)
+            #elif epoch == 0:
+            #    hyd_data = only_rain(hyd_data)
 
+            #flow = hyd_data[:, :, :]
+            #outputs = model(flow)
             outputs = model(hyd_data)
             if torch.max(np.isnan(outputs.data)) == 1:
                 raise Exception('nan generated')
@@ -225,7 +228,11 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
                 loss = criterion(outputs[:, 0], signatures[:, 0])
             else:
                 signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-                loss = criterion(outputs[:, int(outputs.shape[1]/8):, :], signatures_ref)
+                if encoder_type == EncType.LSTMEncoder:
+                    1/0  # restore me
+                #    loss = criterion(outputs[:, int(outputs.shape[1]/8):, :], signatures_ref)
+                #else:
+                loss = criterion(outputs, signatures_ref.squeeze())
                 #final value only
                 #loss = criterion(outputs[:, -1, :], signatures_ref[:, 0, :])
             if torch.isnan(loss):
@@ -251,7 +258,7 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
                               str(np.around(error, decimals=3))))
-                num2plot = 5  # num_sigs
+                num2plot = num_sigs
                 fig = plt.figure()
                 ax_input = fig.add_subplot(3, 1, 1)
                 ax_sigs = fig.add_subplot(3, 1, 2)
@@ -261,9 +268,16 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
                 ax_input.plot(hyd_data[:, 0, :].numpy())  #Batch 0
                 colors = plt.cm.jet(np.linspace(0, 1, num2plot))
                 for j in range(num2plot):  # range(num_sigs):
-                    ax_sigs.plot(outputs.data[0, :, j].numpy(), color=colors[j, :])  #Batch 0
-                    ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(outputs.shape[1], num_sigs).numpy(),
-                                 color=colors[j, :])  #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
+                    if encoder_type == EncType.LSTMEncoder:
+                        ax_sigs.plot(outputs.data[0, :, j].numpy(), color=colors[j, :])  #Batch 0
+                        ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(outputs.shape[1], num_sigs).numpy(),
+                                     color=colors[j, :])  #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
+                    else:
+                        plotme = np.zeros(2)
+                        plotme[0] = outputs.data[0, j].numpy()
+                        plotme[1] = signatures.data[0, j].numpy()
+                        ax_sigs.plot(plotme, color=colors[j, :])  # Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
+
                 ax1.plot(acc_list, color='r')
                 ax1.plot(moving_average(acc_list), color='#AA0000')
                 ax1.set_ylabel("error (red)")
@@ -273,17 +287,7 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
                 ax2.plot(moving_average(loss_list), color='#0000AA')
                 ax2.set_ylabel("loss (blue)")
 
-                #plt.show()
-
-                if not shown:
-                    fig.show()
-                    #shown = True
-                else:
-                    #This isn't working../
-                    fig.canvas.draw()
-                    fig.canvas.flush_events()
-                    plt.pause(0.000000000001)
-                    #time.sleep(0.01)
+                fig.show()
 
     # Test the model
     model.eval()
@@ -291,9 +295,14 @@ def train_encoder_only(train_loader, test_loader, input_dim, pretrained_encoder_
         error_test = None
         error_baseline = None
         for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(test_loader):
-            outputs = model(hyd_data.permute(2, 0, 1)[:, :, encoder_indices])
-            predicted = outputs[:, -1, :]
-            error = predicted.squeeze() - signatures.squeeze()
+            hyd_data = hyd_data[:, encoder_indices, :]
+            if encoder_type == EncType.LSTMEncoder:
+                outputs = model(hyd_data.permute(2, 0, 1)[:, :, encoder_indices])
+                outputs = outputs[:, -1, :]
+            else:
+                outputs = model(hyd_data)
+
+            error = outputs.squeeze() - signatures.squeeze()
             error_bl = signatures  # relative to predicting 0 for everything
             if error_test is None:
                 error_test = error
@@ -829,7 +838,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
-        = load_inputs(subsample_data=20, years_per_sample=2, batch_size=batch_size)
+        = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
@@ -839,7 +848,7 @@ def train_test_everything():
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
-    encoder_type = EncType.NoEncoder
+    encoder_type = EncType.CNNEncoder
     encoding_num_layers = 2
     if encoder_type != EncType.NoEncoder:
         encoding_dim = 25
@@ -869,11 +878,12 @@ def train_test_everything():
         decoder_indices = get_indices(decoder_names, hyd_data_labels)
 
     if True and encoder_type != EncType.NoEncoder:
-        train_encoder_only(train_loader, test_loader=validate_loader, input_dim=encoder_input_dim,
+        train_encoder_only(encoder_type, train_loader, test_loader=validate_loader, input_dim=encoder_input_dim,
                            pretrained_encoder_path=pretrained_encoder_path,
                            num_layers=encoding_num_layers, encoding_dim=encoding_dim,
                            hidden_dim=encoding_hidden_dim,
                            num_sigs=num_sigs, batch_size=batch_size, encoder_indices=encoder_indices)
+    return
 
     encoder, decoder = setup_encoder_decoder(encoder_input_dim=encoder_input_dim, decoder_input_dim=input_dim,
                                              pretrained_encoder_path=pretrained_encoder_path,
