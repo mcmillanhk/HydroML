@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore")
 class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
-    def __init__(self, csv_file, root_dir_climate, root_dir_flow, csv_file_attrib, attribs, years_per_sample, transform,
+    def __init__(self, csv_file, root_dir_climate, root_dir_signatures, root_dir_flow, csv_file_attrib, attribs, years_per_sample, transform,
                  subsample_data, sigs_as_input):
         """
         Args:
@@ -42,8 +42,6 @@ class CamelsDataset(Dataset):
         self.normalize_outputs = False
 
         self.sigs_as_input = sigs_as_input
-
-        #maxgoodyear = 2013  # Don't use any years after this
 
         self.attrib_files = None
         for file in csv_file_attrib:
@@ -70,6 +68,10 @@ class CamelsDataset(Dataset):
         types_dict.update({col: float for col in col_names if col not in types_dict})
 
         self.signatures_frame = pd.read_csv(csv_file, sep=';', dtype=types_dict)
+        num_sites_init = len(self.signatures_frame)
+        self.signatures_frame.drop('slope_fdc', axis=1, inplace=True)
+        self.signatures_frame.dropna(inplace=True)
+
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
         self.transform = transform
@@ -79,11 +81,12 @@ class CamelsDataset(Dataset):
 
         """number of samples depends on years/sample. 35 years total; use up to 34 as 35 has a lot of missing data"""
         num_sites = len(self.signatures_frame)
+        print(f"Dropped {num_sites-num_sites_init} of {num_sites} sites because of nan")
         #self.num_samples_per_site = math.floor(34 / self.years_per_sample)
         #self.num_samples = self.num_sites * self.num_samples_per_site
 
         """Save areas in order to later convert flow data to mm"""
-        root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
+        #  root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
         area_file = os.path.join(root_dir_signatures, 'camels_topo.txt')
         col_names = pd.read_csv(area_file, nrows=0).columns
         types_dict = {'gauge_id': str}
@@ -97,7 +100,7 @@ class CamelsDataset(Dataset):
             #'gauge_id': 1,
             'q_mean': 1,
             'runoff_ratio': 1,
-            'slope_fdc': 1,
+            #'slope_fdc': 1,
             'baseflow_index':1,
             'stream_elas' : 1,
             'q5': 1,
@@ -140,13 +143,11 @@ class CamelsDataset(Dataset):
             print(f"Load {idx_site}/{num_to_load}")
             """Read in climate and flow data for this site"""
             gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
-            flow_file = gauge_id + '_streamflow_qc.txt'
-            flow_data_name = os.path.join(self.root_dir_flow, flow_file)
+            flow_data_name = self.get_streamflow_filename(gauge_id)
             flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
                                     names=["year", "month", "day", "flow(cfs)", "qc"])
 
-            climate_file = str(self.signatures_frame.iloc[idx_site, 0]) + '_lump_cida_forcing_leap.txt'
-            climate_data_name = os.path.join(self.root_dir_climate, climate_file)
+            climate_data_name = self.get_met_filename(str(self.signatures_frame.iloc[idx_site, 0]))
             climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
                                        usecols=[0, 1, 2, 3, 4, 5, 6, 7],
                                        parse_dates=True,
@@ -247,6 +248,20 @@ class CamelsDataset(Dataset):
             self.all_items = [self.load_item(i) for i in range(0, self.num_samples)]
             #self.all_items = pool.map(self.load_item, range(0, self.num_samples))
             self.all_csv_files = None"""
+    def get_subdir_filename(self, root_dir, gauge_id, file_suffix):
+        flow_file = gauge_id + file_suffix
+        subdirs = ['.', gauge_id[0:2]] + os.listdir(root_dir)
+        for dirname in subdirs:
+            flow_data_name = os.path.join(root_dir, dirname, flow_file)
+            if os.path.exists(flow_data_name):
+                return flow_data_name
+        raise Exception(flow_file + ' not found in ' + self.root_dir_flow)
+
+    def get_streamflow_filename(self, gauge_id):
+        return self.get_subdir_filename(self.root_dir_flow, gauge_id, '_streamflow_qc.txt')
+
+    def get_met_filename(self, gauge_id):
+        return self.get_subdir_filename(self.root_dir_climate, gauge_id, '_lump_cida_forcing_leap.txt')
 
     def __len__(self):
 
@@ -367,10 +382,9 @@ class CamelsDataset(Dataset):
         if gauge_id in self.all_csv_files.keys():
             return self.all_csv_files[gauge_id]
 
-        climate_file = gauge_id + '_lump_cida_forcing_leap.txt'
-        flow_file = gauge_id + '_streamflow_qc.txt'
+        climate_file = self.get_met_filename(gauge_id)
+        flow_data_name = self.get_streamflow_filename(gauge_id)
         climate_data_name = os.path.join(self.root_dir_climate, climate_file)
-        flow_data_name = os.path.join(self.root_dir_flow, flow_file)
         #  print("Got file names")
         """Extract correct years out of each file"""
         flow_data_ymd = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],

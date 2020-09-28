@@ -21,12 +21,14 @@ class ModelType(Enum):
 
 
 def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
-
+    data_root = os.path.join('D:\\', 'Hil_ML', 'Input', 'CAMELS')
+    data_root = os.path.join('C:\\', 'hydro', 'basin_dataset_public_v1p2')
     load_test = False
-    root_dir_flow = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'usgs_streamflow')
-    root_dir_climate = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'basin_mean_forcing', 'daymet')
-    root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
+    root_dir_flow = os.path.join(data_root, 'usgs_streamflow')
+    root_dir_climate = os.path.join(data_root, 'basin_mean_forcing', 'daymet')
+    root_dir_signatures = os.path.join(data_root, 'camels_attributes_v2.0')
     csv_file_train = os.path.join(root_dir_signatures, 'camels_hydro_train.txt')
+    csv_file_validate = os.path.join(root_dir_signatures, 'camels_hydro_validate.txt')
     csv_file_test = os.path.join(root_dir_signatures, 'camels_hydro_test.txt')
 
     csv_file_attrib = [os.path.join(root_dir_signatures, 'camels_' + s + '.txt') for s in
@@ -55,15 +57,15 @@ def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
     sigs_as_input=True
 
     # Camels Dataset
-    train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_flow, csv_file_attrib, attribs,
+    train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, csv_file_attrib, attribs,
                                      years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data,
                                      sigs_as_input=sigs_as_input)
     test_dataset = None
     if load_test:
-        test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, csv_file_attrib, attribs,
+        test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow, csv_file_attrib, attribs,
                                         years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data,
                                         sigs_as_input=sigs_as_input)
-    validate_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_flow, csv_file_attrib, attribs,
+    validate_dataset = Cd.CamelsDataset(csv_file_validate, root_dir_climate, root_dir_signatures, root_dir_flow, csv_file_attrib, attribs,
                                         years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data,
                                         sigs_as_input=sigs_as_input)
 
@@ -845,6 +847,7 @@ def train_test_everything():
 
     #TODO input_dim should come from the loaders
     model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
+    model_store_path = 'c:\\hydro\\pytorch_models\\15-hydyear-realfakedata\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
