@@ -4,11 +4,6 @@ from Util import *
 import numpy as np
 
 
-class Indices:  # TODO still hardcoded in expected_b code
-    SLOW_STORE = 0
-    #SNOW_STORE = last store
-
-
 class HydModelNet(nn.Module):
 
     def __init__(self, input_dim, hidden_dim, store_dim,

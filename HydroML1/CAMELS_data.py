@@ -11,6 +11,8 @@ from torch.utils.data import Dataset, DataLoader
 #from pathlib import Path
 #import datetime
 #from multiprocessing import Pool
+from Util import *
+from DataPoint import *
 
 cfs2mm = 2.446575546
 
@@ -18,32 +20,29 @@ cfs2mm = 2.446575546
 import warnings
 warnings.filterwarnings("ignore")
 
+
 """Used https://pytorch.org/tutorials/beginner/data_loading_tutorial.html as example"""
 
 
 class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
-    def __init__(self, csv_file, root_dir_climate, root_dir_signatures, root_dir_flow, csv_file_attrib, attribs, years_per_sample, transform,
-                 subsample_data, sigs_as_input):
+    def __init__(self, csv_file, root_dir_climate, root_dir_signatures, root_dir_flow,
+                 dataset_properties: DatasetProperties, subsample_data):
         """
         Args:
             csv_file (string): Path to the csv file with signatures.
                needs to be a csv file with catchment name followed by the (numeric?) signatures
                data files should then be named as the catchment name (includes extension)
             root_dir (string): Directory with all the rain, ET, flow data.
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
-
-            csv_file_attrib: list of files containing gauge_id; several attributes. Doesn't seem to be any -999's in here
-            attribs: dict of attrib/normalizing factor for each site
         """
         self.normalize_inputs = False
         self.normalize_outputs = False
 
-        self.sigs_as_input = sigs_as_input
-
         self.attrib_files = None
+
+        csv_file_attrib = [os.path.join(root_dir_signatures, 'camels_' + s + '.txt') for s in
+                           ['soil', 'topo', 'vege', 'geol']]
         for file in csv_file_attrib:
             attrib_file = pd.read_csv(file, sep=';')
             print('Loaded columns ' + str(attrib_file.columns) + ' from ' + file)
@@ -53,9 +52,9 @@ class CamelsDataset(Dataset):
             else:
                 self.attrib_files = pd.merge(left=self.attrib_files, right=attrib_file, left_on='gauge_id',
                                              right_on='gauge_id')
-        self.attrib_files = self.attrib_files[['gauge_id'] + list(attribs.keys())]
+        self.attrib_files = self.attrib_files[['gauge_id'] + list(dataset_properties.attrib_normalizers.keys())]
 
-        for name, normalizer in attribs.items():
+        for name, normalizer in dataset_properties.attrib_normalizers.items():
             self.attrib_files[name] = self.attrib_files[name].transform(lambda x: x*normalizer)
             if np.isnan(self.attrib_files[name]).any():
                 median = np.nanmedian(self.attrib_files[name])
@@ -74,16 +73,13 @@ class CamelsDataset(Dataset):
 
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
-        self.transform = transform
-        self.hyd_data_labels = None
-        self.sig_labels = None
-        self.years_per_sample = years_per_sample
+        #self.hyd_data_labels = None
+        #self.sig_labels = None
+        self.years_per_sample = dataset_properties.years_per_sample
 
-        """number of samples depends on years/sample. 35 years total; use up to 34 as 35 has a lot of missing data"""
+        """number of samples depends on years/sample. """
         num_sites = len(self.signatures_frame)
-        print(f"Dropped {num_sites-num_sites_init} of {num_sites} sites because of nan")
-        #self.num_samples_per_site = math.floor(34 / self.years_per_sample)
-        #self.num_samples = self.num_sites * self.num_samples_per_site
+        print(f"Dropped {num_sites_init-num_sites} of {num_sites_init} sites because of nan")
 
         """Save areas in order to later convert flow data to mm"""
         #  root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
@@ -175,17 +171,17 @@ class CamelsDataset(Dataset):
             water_years = flow_data[select_water_year]
             indices = flow_data.index[select_water_year]
 
-            if water_years.shape[0] < years_per_sample:
+            if water_years.shape[0] < dataset_properties.years_per_sample:
                 continue
 
-            for year_idx in range(water_years.shape[0]-years_per_sample):
+            for year_idx in range(water_years.shape[0]-dataset_properties.years_per_sample):
                 record_start = water_years.iloc[year_idx]
-                record_end = water_years.iloc[year_idx+years_per_sample]
+                record_end = water_years.iloc[year_idx+dataset_properties.years_per_sample]
                 if record_end['qc'] > record_start['qc']:
                     continue  # There's bad data in this interval
 
-                flow_data_subset = flow_data.iloc[list(range(indices[year_idx], indices[year_idx+years_per_sample]))]\
-                    .reset_index(drop=True)
+                flow_data_subset = flow_data.iloc[list(range(indices[year_idx], indices[year_idx+dataset_properties.
+                                                             years_per_sample]))].reset_index(drop=True)
                 #print(flow_data_subset.columns)
                 flow_date_start = pd.datetime(int(record_start['year']), int(record_start['month']),
                                               int(record_start['day'])).date()
@@ -209,45 +205,11 @@ class CamelsDataset(Dataset):
                 hyd_data = pd.concat([flow_data_subset.drop(['year', 'month', 'day'], axis=1),
                                       climate_data_subset.drop(['date'], axis=1)], axis=1, join='inner')
 
-                length_days = 365*years_per_sample
-                if hyd_data.shape[0] > length_days:
-                    hyd_data.drop(hyd_data.tail(hyd_data.shape[0] - length_days).index, inplace=True)
+                if hyd_data.shape[0] > dataset_properties.length_days:
+                    hyd_data.drop(hyd_data.tail(hyd_data.shape[0] - dataset_properties.length_days).index, inplace=True)
 
                 self.all_items.append(self.load_hyddata(gauge_id, flow_date_start, hyd_data))
 
-                #self.num_samples += 1
-                #self.siteyears.append({'gauge_id': gauge_id,
-                #                       'index_in_flow':
-                #                       })
-
-            """Find first/last year of data""
-            minyeartmp = flow_data[(flow_data["month"] == 1) & (flow_data["day"] == 1)].min(axis=0)["year"]
-            if np.isnan(minyeartmp):
-                minyeartmp = -1
-            maxyeartmp = flow_data[(flow_data["month"] == 12) & (flow_data["day"] == 30)].max(axis=0)["year"]
-            if np.isnan(maxyeartmp):
-                maxyeartmp = minyeartmp
-            maxyeartmp = min(maxyeartmp, maxgoodyear)
-            numyearstmp = (maxyeartmp-minyeartmp+1)
-            #numsamplestmp=0
-            #try:
-            numsamplestmp = math.floor(numyearstmp/self.years_per_sample)
-            #except: print("break")
-
-            self.num_samples += numsamplestmp
-
-            self.siteyears.loc[self.signatures_frame.iloc[idx_site, 0]]["RunningTotal"] = self.num_samples"""
-
-        # = runningtotaltmp
-        """
-        self.all_csv_files = {}
-
-        self.load_all = True
-        if self.load_all:
-            #pool = Pool(4)
-            self.all_items = [self.load_item(i) for i in range(0, self.num_samples)]
-            #self.all_items = pool.map(self.load_item, range(0, self.num_samples))
-            self.all_csv_files = None"""
     def get_subdir_filename(self, root_dir, gauge_id, file_suffix):
         flow_file = gauge_id + file_suffix
         subdirs = ['.', gauge_id[0:2]] + os.listdir(root_dir)
@@ -337,15 +299,15 @@ class CamelsDataset(Dataset):
 
         #print('Load ' + gauge_id)
         attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == int(gauge_id)]
-        for key in attribs.columns:
+        """for key in attribs.columns:
             if key != 'gauge_id':
-                hyd_data[key] = attribs[key].iloc[0]
+                hyd_data[key] = attribs[key].iloc[0]"""
         #self.check_dataframe(hyd_data)
 
         signatures = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].drop('gauge_id', axis=1)
         self.check_dataframe(signatures)
 
-        if self.sigs_as_input:
+        """if self.sigs_as_input:
             #for key in signatures.columns:
             for key, value in signatures.items():
                 if key == 'gauge_id':
@@ -356,26 +318,25 @@ class CamelsDataset(Dataset):
                 hyd_data.insert(len(hyd_data.columns), key, val)
                 #self.check_dataframe(hyd_data)
 
-        #self.check_dataframe(hyd_data)
+        #self.check_dataframe(hyd_data)"""
 
-        """Get signatures related to site"""
+        """Get signatures related to site"" "
         self.sig_labels = [label.strip() for label in signatures.columns]
         signatures = np.array(signatures)
         signatures = signatures.astype('double').reshape(-1, 1)
         if np.isnan(signatures).any() or signatures[signatures == -999].any():
-            raise Exception('nan in signatures')
+            raise Exception('nan in signatures')"""
 
-        #self.hyd_data_labels = hyd_data.columns
-        self.hyd_data_labels = [label.strip() for label in hyd_data.columns]
+        #self.hyd_data_labels = [label.strip() for label in hyd_data.columns]
 
         #hyd_data is t x i
-        sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start),
-                  'hyd_data': hyd_data, 'signatures': signatures}  #, 'hyd_data_labels': hyd_data.columns}
+        #sample = {'gauge_id': gauge_id, 'date_start': str(flow_date_start),
+        #          'hyd_data': hyd_data, 'signatures': signatures}  #, 'hyd_data_labels': hyd_data.columns}
 
-        if self.transform:
-            sample = self.transform(sample)
+        #if self.transform:
+        #    sample = self.transform(sample)
 
-        return sample
+        return DataPoint(gauge_id+str(flow_date_start), np.array(hyd_data), hyd_data.columns.tolist(), signatures, attribs)
 
     def load_flow_climate_csv(self, gauge_id):
 

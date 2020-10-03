@@ -3,6 +3,7 @@
 from torch.utils.data import DataLoader
 #import numpy as np
 import CAMELS_data as Cd
+from DataPoint import *
 import os
 import math
 import matplotlib.pyplot as plt
@@ -14,13 +15,7 @@ import random
 weight_decay = 0.001
 
 
-class ModelType(Enum):
-    LSTM = 0
-    ConvNet = 1
-    HydModel = 2
-
-
-def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
+def load_inputs(subsample_data=1, batch_size=20):
     data_root = os.path.join('D:\\', 'Hil_ML', 'Input', 'CAMELS')
     data_root = os.path.join('C:\\', 'hydro', 'basin_dataset_public_v1p2')
     load_test = False
@@ -31,57 +26,32 @@ def load_inputs(subsample_data=1, years_per_sample=2, batch_size=20):
     csv_file_validate = os.path.join(root_dir_signatures, 'camels_hydro_validate.txt')
     csv_file_test = os.path.join(root_dir_signatures, 'camels_hydro_test.txt')
 
-    csv_file_attrib = [os.path.join(root_dir_signatures, 'camels_' + s + '.txt') for s in
-                       ['soil', 'topo', 'vege', 'geol']]
-    attribs = {'carbonate_rocks_frac': 1.0,  # Numbers, not categories, from geol.
-               'geol_porostiy': 1.0,
-               'geol_permeability': 0.1,
-               'soil_depth_pelletier': 0.1,  # everything from soil
-               'soil_depth_statsgo': 1,
-               'soil_porosity': 1,
-               'soil_conductivity': 1,
-               'max_water_content': 1,
-               'sand_frac': 0.01,  # These are percentages
-               'silt_frac': 0.01,
-               'clay_frac': 0.01,
-               'water_frac': 0.01,
-               'organic_frac': 0.01,
-               'other_frac': 0.01,
-               'elev_mean': 0.001,  # topo: not lat/long
-               'slope_mean': 0.01,
-               'area_gages2': 0.001,  # only the reliable of the 2 areas
-               'gvf_max': 1,  # leaf area index seems totally correlated with these
-               'gvf_diff': 1,
-               }
-
-    sigs_as_input=True
+    #sigs_as_input=True
 
     # Camels Dataset
-    train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, csv_file_attrib, attribs,
-                                     years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data,
-                                     sigs_as_input=sigs_as_input)
+    dataset_properties = DatasetProperties()
+
+    train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, dataset_properties,
+                                     subsample_data=subsample_data)
     test_dataset = None
     if load_test:
-        test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow, csv_file_attrib, attribs,
-                                        years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data,
-                                        sigs_as_input=sigs_as_input)
-    validate_dataset = Cd.CamelsDataset(csv_file_validate, root_dir_climate, root_dir_signatures, root_dir_flow, csv_file_attrib, attribs,
-                                        years_per_sample, transform=Cd.ToTensor(), subsample_data=subsample_data,
-                                        sigs_as_input=sigs_as_input)
+        test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
+                                        dataset_properties, subsample_data=subsample_data)
+    validate_dataset = Cd.CamelsDataset(csv_file_validate, root_dir_climate, root_dir_signatures, root_dir_flow,
+                                        dataset_properties, subsample_data=subsample_data)
 
     # Data loader
-    #if __name__ == '__main__':
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size,
-                                 shuffle=True)  # Shuffle so we get less spiky validation plots
-    test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
+                                 shuffle=True, collate_fn=collate_fn)  # Shuffle so we get less spiky validation plots
+    test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False,
+                                                               collate_fn=collate_fn)
 
-    input_dim = 8 + len(attribs)
-    if sigs_as_input:
-        input_dim = input_dim + len(train_dataset.sig_labels)
+    #input_dim = 8 + len(attribs)
+    #if sigs_as_input:
+    #    input_dim = input_dim + len(train_dataset.sig_labels)
 
-    return train_loader, validate_loader, test_loader, input_dim, \
-           train_dataset.hyd_data_labels, train_dataset.sig_labels
+    return train_loader, validate_loader, test_loader, dataset_properties
 
 
 def moving_average(a, n=13):
@@ -92,10 +62,10 @@ def moving_average(a, n=13):
 
 # Convolutional neural network (two convolutional layers)
 class ConvNet(nn.Module):
-    def __init__(self, num_sigs, years_per_sample, encoder_input_dim):
+    def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties,):
         super(ConvNet, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv1d(encoder_input_dim, 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
+            nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
             nn.ReLU())
         #   , nn.MaxPool1d(kernel_size=5, stride=5))
         self.layer2 = nn.Sequential(
@@ -107,8 +77,9 @@ class ConvNet(nn.Module):
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=5, stride=5))
         self.drop_out = nn.Dropout()
-        self.fc1 = nn.Linear(math.floor(((int(years_per_sample)*365/4)/20)) * 16, 50)
-        self.fc2 = nn.Linear(50, num_sigs)
+        self.fc1 = nn.Linear(math.floor(((dataset_properties.length_days/4)/20)) * 16,
+                             encoder_properties.encoding_dim())
+        self.fc2 = nn.Linear(encoder_properties.encoding_dim(), dataset_properties.num_sigs())
 
     def forward(self, x):
         out = self.layer1(x)
@@ -125,8 +96,7 @@ class ConvNet(nn.Module):
 
 class SimpleLSTM(nn.Module):
 
-    def __init__(self, input_dim, hidden_dim, batch_size, output_dim,
-                 num_layers, encoding_dim):
+    def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties, batch_size):
         super(SimpleLSTM, self).__init__()
 
         if encoding_dim == 0:
@@ -176,21 +146,20 @@ class SimpleLSTM(nn.Module):
         return y_pred
 
 
-def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretrained_encoder_path, num_layers, encoding_dim,
-                       hidden_dim, batch_size, num_sigs, encoder_indices):
-    # Hyperparameters
-    #modeltype = 'LSTM'  # 'Conv'
+def train_encoder_only(train_loader, test_loader, dataset_properties: DatasetProperties,
+                       encoder_properties: EncoderProperties, pretrained_encoder_path, batch_size):
+
     num_epochs = 2
     learning_rate = 0.00005  # 0.001 works well for the subset. So does .0001 (maybe too fast though?)
 
     shown = False
 
     #input_dim = 8 + len(attribs)
-    if encoder_type == EncType.CNNEncoder:
-        model = ConvNet(num_sigs=num_sigs, years_per_sample=2, encoder_input_dim=len(encoder_indices))
-    elif encoder_type == EncType.LSTMEncoder:
-        model = SimpleLSTM(input_dim=input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
-                           num_layers=num_layers, encoding_dim=encoding_dim)
+    if encoder_properties.encoder_type == EncType.CNNEncoder:
+        model = ConvNet(dataset_properties, encoder_properties,)
+    elif encoder_properties.encoder_type == EncType.LSTMEncoder:
+        model = SimpleLSTM(dataset_properties, encoder_properties,
+                           batch_size=batch_size)
     else:
         raise Exception("Unhandled network structure")
 
@@ -207,15 +176,14 @@ def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretr
     acc_list = []
     #hyd_data_labels = train_loader.hyd_data_labels
     for epoch in range(num_epochs):
-        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+        #datapoints: list[DataPoint]
+        for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
             # Run the forward pass
             #hyd_data_labels = train_loader.hyd_data_labels
-            if True:
-                hyd_data = hyd_data[:, encoder_indices, :]
+            hyd_data = encoder_properties.select_encoder_inputs(datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
 
-            if encoder_type == EncType.LSTMEncoder:
+            if encoder_properties.encoder_type == EncType.LSTMEncoder:
                 model.hidden = model.init_hidden()
-                hyd_data = hyd_data.permute(2, 0, 1)  # b x i x t -> t x b x i
 
             #elif epoch == 0:
             #    hyd_data = only_rain(hyd_data)
@@ -225,8 +193,10 @@ def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretr
             outputs = model(hyd_data)
             if torch.max(np.isnan(outputs.data)) == 1:
                 raise Exception('nan generated')
-            signatures = np.squeeze(signatures)  # signatures is b x s x ?
-            if num_sigs == 1:
+            signatures_ref = datapoints.signatures_tensor()  # np.squeeze(signatures)  # signatures is b x s x ?
+            loss = criterion(outputs, signatures_ref)
+
+            """if num_sigs == 1:
                 loss = criterion(outputs[:, 0], signatures[:, 0])
             else:
                 signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
@@ -236,7 +206,7 @@ def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretr
                 #else:
                 loss = criterion(outputs, signatures_ref.squeeze())
                 #final value only
-                #loss = criterion(outputs[:, -1, :], signatures_ref[:, 0, :])
+                #loss = criterion(outputs[:, -1, :], signatures_ref[:, 0, :])"""
             if torch.isnan(loss):
                 raise Exception('loss is nan')
 
@@ -250,17 +220,16 @@ def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretr
             # Track the accuracy
             #total = signatures.size(0)
             #predicted = outputs[:, -1, :]  # torch.max(outputs.data, 1)
-            signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-            error = np.mean((np.abs(outputs.data - signatures_ref)
+            #signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
+            rel_error = np.mean((np.abs(outputs.data - signatures_ref)
                              / (0.5*(np.abs(signatures_ref) + np.abs(outputs.data)) + 1e-8)).numpy())
 
-            acc_list.append(error.item())
+            acc_list.append(rel_error.item())
 
-            if (i + 1) % 5 == 0:
-                print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
-                      .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                              str(np.around(error, decimals=3))))
-                num2plot = num_sigs
+            if (idx + 1) % 5 == 0:
+                print(f'Epoch {epoch} / {num_epochs}, Step {idx} / {total_step}, Loss: {loss.item()}, Error norm: '
+                      f'{str(np.around(rel_error, decimals=3))}')
+                num2plot = signatures_ref.shape[1]
                 fig = plt.figure()
                 ax_input = fig.add_subplot(3, 1, 1)
                 ax_sigs = fig.add_subplot(3, 1, 2)
@@ -270,14 +239,14 @@ def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretr
                 ax_input.plot(hyd_data[:, 0, :].numpy())  #Batch 0
                 colors = plt.cm.jet(np.linspace(0, 1, num2plot))
                 for j in range(num2plot):  # range(num_sigs):
-                    if encoder_type == EncType.LSTMEncoder:
+                    if encoder_properties.encoder_type == EncType.LSTMEncoder:
                         ax_sigs.plot(outputs.data[0, :, j].numpy(), color=colors[j, :])  #Batch 0
-                        ax_sigs.plot(signatures.data[0, j].unsqueeze(0).repeat(outputs.shape[1], num_sigs).numpy(),
+                        ax_sigs.plot(signatures_ref.data[0, j].unsqueeze(0).repeat(outputs.shape[1], signatures_ref.shape[1]).numpy(),
                                      color=colors[j, :])  #Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
                     else:
                         plotme = np.zeros(2)
                         plotme[0] = outputs.data[0, j].numpy()
-                        plotme[1] = signatures.data[0, j].numpy()
+                        plotme[1] = signatures_ref.data[0, j].numpy()
                         ax_sigs.plot(plotme, color=colors[j, :])  # Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
 
                 ax1.plot(acc_list, color='r')
@@ -296,21 +265,17 @@ def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretr
     with torch.no_grad():
         error_test = None
         error_baseline = None
-        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(test_loader):
-            hyd_data = hyd_data[:, encoder_indices, :]
-            if encoder_type == EncType.LSTMEncoder:
-                outputs = model(hyd_data.permute(2, 0, 1)[:, :, encoder_indices])
-                outputs = outputs[:, -1, :]
-            else:
-                outputs = model(hyd_data)
-
-            error = outputs.squeeze() - signatures.squeeze()
+        for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
+            hyd_data = encoder_properties.select_encoder_inputs(datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+            outputs = model(hyd_data)
+            signatures = datapoints.signatures_tensor()
+            rel_error = outputs - signatures
             error_bl = signatures  # relative to predicting 0 for everything
             if error_test is None:
-                error_test = error
+                error_test = rel_error
                 error_baseline = error_bl
             else:
-                error_test = np.vstack([error_test, error])
+                error_test = np.vstack([error_test, rel_error])
                 error_baseline = np.vstack([error_baseline, error_bl])
 
         error_test[np.isinf(error_test)] = np.nan
@@ -325,7 +290,7 @@ def train_encoder_only(encoder_type, train_loader, test_loader, input_dim, pretr
 
     errorfig = plt.figure()
     ax_errorfig = errorfig.add_subplot(2, 1, 1)
-    x = np.array(range(num_sigs))
+    x = np.array(range(len(dataset_properties.sig_normalizers)))
     ax_errorfig.plot(x, error_test_mean, label="Test_Error")
     ax_errorfig.plot(x, error_baseline_mean, label="Baseline_Error")
     ax_errorfig.legend()
@@ -363,10 +328,10 @@ def setup_encoder_decoder(encoder_input_dim, decoder_input_dim, pretrained_encod
         encoder.output_encoding = True
 
     decoder = None
-    if decoder_model_type == ModelType.LSTM:
+    if decoder_model_type == DecoderType.LSTM:
         decoder = SimpleLSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size,
                              output_dim=output_dim, num_layers=output_layers, encoding_dim=encoding_dim).double()
-    elif decoder_model_type == ModelType.HydModel:
+    elif decoder_model_type == DecoderType.HydModel:
         decoder = HydModelNet(decoder_input_dim, decoder_hidden_dim, store_dim, output_layers, True, hyd_data_labels)
     decoder = decoder.double()
 
@@ -742,7 +707,7 @@ def compute_loss(criterion, flow, hyd_data, outputs):
 
 def run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model, decoder_indices,
                         hyd_data_labels, encoder_type):
-    if model == ModelType.LSTM:
+    if model == DecoderType.LSTM:
         flow, outputs = run_encoder_decoder_lstm(decoder, encoder, hyd_data, restricted_input)
     else:
         flow, outputs = run_encoder_decoder_hydmodel(decoder, encoder, hyd_data, encoder_indices, decoder_indices,
@@ -839,8 +804,8 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 def train_test_everything():
     batch_size = 20
 
-    train_loader, validate_loader, test_loader, input_dim, hyd_data_labels, sig_labels\
-        = load_inputs(subsample_data=1, years_per_sample=2, batch_size=batch_size)
+    train_loader, validate_loader, test_loader, dataset_properties \
+        = load_inputs(subsample_data=100, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
@@ -851,24 +816,11 @@ def train_test_everything():
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
-    encoder_type = EncType.CNNEncoder
-    encoding_num_layers = 2
-    if encoder_type != EncType.NoEncoder:
-        encoding_dim = 25
-    else:
-        encoding_dim = 0
-
-    encoding_hidden_dim = 100
-    store_dim = 4  # 4 is probably the minimum: snow, deep, shallow, runoff
-    num_sigs = train_loader.dataset.signatures_frame.shape[1] - 1
-
-    decoder_model_type = ModelType.HydModel
-
     pretrained_encoder_path = model_store_path + 'encoder.ckpt'
     #pretrained_decoder_path = model_store_path + 'decoder-april19.ckpt'
 
 
-    encoder_indices = None
+    """encoder_indices = None
     decoder_indices = None
     if True:
         encoder_names = ["prcp(mm/day)", 'flow(cfs)', "tmax(C)"]  #"swe(mm)",
@@ -878,14 +830,13 @@ def train_test_everything():
 
     if False:
         decoder_names = encoder_names
-        decoder_indices = get_indices(decoder_names, hyd_data_labels)
+        decoder_indices = get_indices(decoder_names, hyd_data_labels)"""
+    encoder_properties = EncoderProperties()
 
-    if True and encoder_type != EncType.NoEncoder:
-        train_encoder_only(encoder_type, train_loader, test_loader=validate_loader, input_dim=encoder_input_dim,
-                           pretrained_encoder_path=pretrained_encoder_path,
-                           num_layers=encoding_num_layers, encoding_dim=encoding_dim,
-                           hidden_dim=encoding_hidden_dim,
-                           num_sigs=num_sigs, batch_size=batch_size, encoder_indices=encoder_indices)
+    if encoder_properties.encoder_type != EncType.NoEncoder:
+        train_encoder_only(train_loader, test_loader=validate_loader, dataset_properties=
+                           dataset_properties, encoder_properties=encoder_properties,
+                           pretrained_encoder_path=pretrained_encoder_path, batch_size=batch_size)
     return
 
     encoder, decoder = setup_encoder_decoder(encoder_input_dim=encoder_input_dim, decoder_input_dim=input_dim,
