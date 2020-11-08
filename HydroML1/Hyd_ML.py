@@ -1,5 +1,6 @@
 #import torch
 #import torch.nn as nn
+from matplotlib.collections import LineCollection
 from torch.utils.data import DataLoader
 #import numpy as np
 import CAMELS_data as Cd
@@ -11,6 +12,10 @@ import time
 from HydModelNet import *
 from Util import *
 import random
+import shapefile as shp
+#from mpl_toolkits import Basemap, cm
+#from mpl_toolkits.basemap import Basemap, cm
+#import cartopy.crs as ccrs
 
 weight_decay = 0.001
 
@@ -146,11 +151,50 @@ class SimpleLSTM(nn.Module):
         return y_pred
 
 
-def train_encoder_only(train_loader, test_loader, dataset_properties: DatasetProperties,
+def test_encoder(data_loader: DataLoader, encoder: nn.Module, encoder_properties: EncoderProperties):
+    #encoder.test()
+    encodings = None
+    lats = None
+    lons = None
+    for idx, datapoints in enumerate(data_loader):
+        hyd_data = encoder_properties.select_encoder_inputs(
+            datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+
+        if encoder_properties.encoder_type == EncType.LSTMEncoder:
+            encoder.hidden = encoder.init_hidden()
+
+        encoding = encoder(hyd_data).detach().numpy()
+        encodings = encoding if encodings is None else np.concatenate((encodings, encoding))
+
+        lats = datapoints.latlong['gauge_lat'].to_numpy() if lats is None \
+            else np.concatenate((lats, datapoints.latlong['gauge_lat'].to_numpy()))
+        lons = datapoints.latlong['gauge_lon'].to_numpy() if lons is None \
+            else np.concatenate((lons, datapoints.latlong['gauge_lon'].to_numpy()))
+
+    sf = shp.Reader("states_shapefile/cb_2017_us_state_5m.shp")
+
+    for i in range(encodings.shape[1]):
+        fig = plt.figure(figsize=(8, 8))
+
+        encodingvec = encodings[:, i]
+        encodingveccols = (encodingvec-encodingvec.min())/(encodingvec.max()-encodingvec.min())
+        plt.scatter(lons, lats, c=encodingveccols, cmap='viridis')
+
+        for stateshape in sf.shapeRecords():
+            if stateshape.record.STUSPS in {'AK', 'PR', 'HI', 'GU', 'MP', 'VI', 'AS'}:
+                continue
+            x = [a[0] for a in stateshape.shape.points[:]]
+            y = [a[1] for a in stateshape.shape.points[:]]
+            plt.plot(x, y, 'k')
+        plt.title(f'Encoding {i}')
+        plt.show()
+
+
+def train_encoder_only(train_loader, validate_loader, dataset_properties: DatasetProperties,
                        encoder_properties: EncoderProperties, pretrained_encoder_path, batch_size):
 
-    num_epochs = 2
-    learning_rate = 0.00005  # 0.001 works well for the subset. So does .0001 (maybe too fast though?)
+    num_epochs = 30
+    learning_rate = 0.00001  # 0.001 works well for the subset. So does .0001 (maybe too fast though?)
 
     shown = False
 
@@ -173,10 +217,12 @@ def train_encoder_only(train_loader, test_loader, dataset_properties: DatasetPro
     # Train the model
     total_step = len(train_loader)
     loss_list = []
+    validation_loss_list = []
     acc_list = []
     #hyd_data_labels = train_loader.hyd_data_labels
     for epoch in range(num_epochs):
         #datapoints: list[DataPoint]
+        model.train()
         for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
             # Run the forward pass
             #hyd_data_labels = train_loader.hyd_data_labels
@@ -221,12 +267,11 @@ def train_encoder_only(train_loader, test_loader, dataset_properties: DatasetPro
             #total = signatures.size(0)
             #predicted = outputs[:, -1, :]  # torch.max(outputs.data, 1)
             #signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-            rel_error = np.mean((np.abs(outputs.data - signatures_ref)
-                             / (0.5*(np.abs(signatures_ref) + np.abs(outputs.data)) + 1e-8)).numpy())
+            rel_error = np.mean(rel_error_vec(outputs, signatures_ref, dataset_properties))
 
             acc_list.append(rel_error.item())
 
-            if (idx + 1) % 5 == 0:
+            if idx == len(train_loader)-1:
                 print(f'Epoch {epoch} / {num_epochs}, Step {idx} / {total_step}, Loss: {loss.item()}, Error norm: '
                       f'{str(np.around(rel_error, decimals=3))}')
                 num2plot = signatures_ref.shape[1]
@@ -256,48 +301,62 @@ def train_encoder_only(train_loader, test_loader, dataset_properties: DatasetPro
                 ax2 = ax1.twinx()
                 ax2.plot(loss_list, color='b')
                 ax2.plot(moving_average(loss_list), color='#0000AA')
-                ax2.set_ylabel("loss (blue)")
+                ax2.set_ylabel("train/val loss (blue/green)")
+                ax2 = ax1.twinx()
+                if(len(validation_loss_list)>0):
+                    ax2.plot(moving_average(validation_loss_list), color='#00AA00')
 
                 fig.show()
 
-    # Test the model
-    model.eval()
-    with torch.no_grad():
-        error_test = None
-        error_baseline = None
-        for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
-            hyd_data = encoder_properties.select_encoder_inputs(datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
-            outputs = model(hyd_data)
-            signatures = datapoints.signatures_tensor()
-            rel_error = outputs - signatures
-            error_bl = signatures  # relative to predicting 0 for everything
-            if error_test is None:
-                error_test = rel_error
-                error_baseline = error_bl
-            else:
-                error_test = np.vstack([error_test, rel_error])
-                error_baseline = np.vstack([error_baseline, error_bl])
+        # Test the model
+        model.eval()
+        with torch.no_grad():
+            validation_loss = []
+            baseline_loss = []
+            rel_error = None
+            for idx, datapoints in enumerate(validate_loader):  #TODO we need to enumerate and batch the correct datapoints
+                hyd_data = encoder_properties.select_encoder_inputs(datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+                outputs = model(hyd_data)
+                signatures_ref = datapoints.signatures_tensor()
+                error = criterion(outputs, signatures_ref).item()
+                error_bl = criterion(0*outputs, signatures_ref).item()  # relative to predicting 0 for everything
+                validation_loss.append(error)
+                baseline_loss.append(error_bl)
 
-        error_test[np.isinf(error_test)] = np.nan
-        error_test_mean = np.nanmean(np.fabs(error_test), axis=0)
-        print('Test Accuracy of the model on the test data (mean abs error): {} %'.format(error_test_mean))
-        error_baseline_mean = np.nanmean(np.fabs(error_baseline), axis=0)
-        print('Baseline test accuracy (mean abs error): {} %'.format(error_baseline_mean))
+                rev = rel_error_vec(outputs, signatures_ref, dataset_properties)
+                rel_error = rev if rel_error is None else np.concatenate((rel_error, rev))
 
-    #np.linalg.norm(error_test, axis=0)
-    # Save the model and plot
-    torch.save(model.state_dict(), pretrained_encoder_path)
+            #error_test[np.isinf(error_test)] = np.nan
+            #error_test_mean = np.nanmean(np.fabs(error_test), axis=0)
+            print(f'Test Accuracy of the model on the test data (mean loss): {np.mean(validation_loss)}')
+            error_baseline_mean = np.nanmean(np.fabs(baseline_loss), axis=0)
+            print(f'Baseline test accuracy (mean abs error): {error_baseline_mean}')
 
-    errorfig = plt.figure()
-    ax_errorfig = errorfig.add_subplot(2, 1, 1)
-    x = np.array(range(len(dataset_properties.sig_normalizers)))
-    ax_errorfig.plot(x, error_test_mean, label="Test_Error")
-    ax_errorfig.plot(x, error_baseline_mean, label="Baseline_Error")
-    ax_errorfig.legend()
+        #np.linalg.norm(error_test, axis=0)
+        # Save the model and plot
+        torch.save(model.state_dict(), pretrained_encoder_path)
 
-    ax_boxwhisker = errorfig.add_subplot(2, 1, 2)
-    ax_boxwhisker.boxplot(error_test)
-    errorfig.show()
+        while(len(validation_loss_list) < len(loss_list)):
+            validation_loss_list += validation_loss
+
+        errorfig = plt.figure()
+        ax_errorfig = errorfig.add_subplot(2, 1, 1)
+        #x = np.array(range(len(validation_loss_list)))
+        ax_errorfig.plot(validation_loss_list, label="Test_Error")
+        ax_errorfig.plot(error_baseline_mean, label="Baseline_Error")
+        ax_errorfig.legend()
+
+        ax_boxwhisker = errorfig.add_subplot(2, 1, 2)
+        ax_boxwhisker.boxplot(rel_error, labels=list(dataset_properties.sig_normalizers.keys()), vert=False)
+        ax_boxwhisker.xlim(0, 5)
+        errorfig.show()
+
+
+
+def rel_error_vec(outputs, signatures_ref, dataset_properties: DatasetProperties): # outputs: b x s, signatures_ref: b x s
+    denom = np.expand_dims(np.mean(signatures_ref.numpy(), axis=0), 0) + 1e-8
+    denom[:, dataset_properties.sig_index('zero_q_freq')] = 1
+    return np.abs(outputs.data - signatures_ref).numpy() / denom
 
 
 def only_rain(ihyd_data):
@@ -833,8 +892,13 @@ def train_test_everything():
         decoder_indices = get_indices(decoder_names, hyd_data_labels)"""
     encoder_properties = EncoderProperties()
 
+    enc = ConvNet(dataset_properties, encoder_properties, ).double()
+    enc.load_state_dict(torch.load(pretrained_encoder_path))
+    test_encoder(train_loader, enc, encoder_properties)
+    return
+
     if encoder_properties.encoder_type != EncType.NoEncoder:
-        train_encoder_only(train_loader, test_loader=validate_loader, dataset_properties=
+        train_encoder_only(train_loader, validate_loader=validate_loader, dataset_properties=
                            dataset_properties, encoder_properties=encoder_properties,
                            pretrained_encoder_path=pretrained_encoder_path, batch_size=batch_size)
     return

@@ -55,6 +55,8 @@ class DatasetProperties:
     }
     def num_sigs(self): return len(self.sig_normalizers)
 
+    def sig_index(self, name): return list(self.sig_normalizers.keys()).index(name)
+
 
 class EncoderProperties:
     encoder_type = EncType.CNNEncoder

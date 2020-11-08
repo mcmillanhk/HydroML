@@ -52,6 +52,7 @@ class CamelsDataset(Dataset):
             else:
                 self.attrib_files = pd.merge(left=self.attrib_files, right=attrib_file, left_on='gauge_id',
                                              right_on='gauge_id')
+        self.latlong = self.attrib_files[['gauge_id', 'gauge_lat', 'gauge_lon']]
         self.attrib_files = self.attrib_files[['gauge_id'] + list(dataset_properties.attrib_normalizers.keys())]
 
         for name, normalizer in dataset_properties.attrib_normalizers.items():
@@ -64,7 +65,7 @@ class CamelsDataset(Dataset):
 
         col_names = pd.read_csv(csv_file, nrows=0).columns
         types_dict = {'gauge_id': str}
-        types_dict.update({col: float for col in col_names if col not in types_dict})
+        types_dict.update({col: np.float64 for col in col_names if col not in types_dict})
 
         self.signatures_frame = pd.read_csv(csv_file, sep=';', dtype=types_dict)
         num_sites_init = len(self.signatures_frame)
@@ -86,7 +87,7 @@ class CamelsDataset(Dataset):
         area_file = os.path.join(root_dir_signatures, 'camels_topo.txt')
         col_names = pd.read_csv(area_file, nrows=0).columns
         types_dict = {'gauge_id': str}
-        types_dict.update({col: float for col in col_names if col not in types_dict})
+        types_dict.update({col: np.float64 for col in col_names if col not in types_dict})
         area_data = pd.read_csv(area_file, sep=';', dtype=types_dict)
         area_data = pd.DataFrame(area_data[['gauge_id', 'area_gages2']])
         area_data.set_index('gauge_id', inplace=True)
@@ -336,7 +337,11 @@ class CamelsDataset(Dataset):
         #if self.transform:
         #    sample = self.transform(sample)
 
-        return DataPoint(gauge_id+str(flow_date_start), np.array(hyd_data), hyd_data.columns.tolist(), signatures, attribs)
+        latlong = self.latlong.loc[self.latlong['gauge_id'] == float(gauge_id)]
+
+
+        return DataPoint(gauge_id+str(flow_date_start), np.array(hyd_data), hyd_data.columns.tolist(), signatures,
+                         attribs, latlong)
 
     def load_flow_climate_csv(self, gauge_id):
 
@@ -354,7 +359,7 @@ class CamelsDataset(Dataset):
                                 parse_dates=[[1, 2, 3]])
         flow_data.columns = ["date", "flow(cfs)", "qc"]
         # convert to float
-        flow_data["flow(cfs)"] = flow_data["flow(cfs)"].astype(float)
+        flow_data["flow(cfs)"] = flow_data["flow(cfs)"].astype(np.float64)
         """Missing data label converted to 0/1"""
         d = {'A': 0, 'A:e': 0, 'M': 1}
         flow_data["qc"] = flow_data["qc"].map(d)

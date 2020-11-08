@@ -5,13 +5,14 @@ import torch
 
 
 class DataPoint:
-    def __init__(self, gauge_id, hydro_data, hydro_data_cols, signatures, attributes):
+    def __init__(self, gauge_id, hydro_data, hydro_data_cols, signatures, attributes, latlong):
         self.gauge_id: List[str] = gauge_id
         #self.hydro_data: pd.DataFrame = hydro_data
         self.hydro_data: np.array = hydro_data
         self.hydro_data_cols: List[str] = hydro_data_cols
         self.signatures: pd.DataFrame = signatures
         self.attributes: pd.DataFrame = attributes
+        self.latlong: pd.DataFrame = latlong
 
     def signatures_tensor(self):
         return torch.tensor(np.array(self.signatures))
@@ -29,5 +30,6 @@ def collate_fn(datapoints: List[DataPoint]):
                      np.dstack([d.hydro_data for d in datapoints]),
                      datapoints[0].hydro_data_cols,
                      pd.concat([d.signatures for d in datapoints], keys=keys),
-                     pd.concat([d.attributes for d in datapoints], keys=keys))
+                     pd.concat([d.signatures for d in datapoints], keys=keys),
+                     pd.concat([d.latlong for d in datapoints], keys=keys))
 
