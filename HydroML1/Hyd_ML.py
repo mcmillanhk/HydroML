@@ -104,7 +104,7 @@ class SimpleLSTM(nn.Module):
     def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties, batch_size):
         super(SimpleLSTM, self).__init__()
 
-        if encoding_dim == 0:
+        if encoder_properties.encoding_dim() == 0:
             print("No encoder")
             return
 
@@ -190,7 +190,7 @@ def test_encoder(data_loader: DataLoader, encoder: nn.Module, encoder_properties
         plt.show()
 
 
-def train_encoder_only(train_loader, validate_loader, dataset_properties: DatasetProperties,
+def train_encoder_only(encoder, train_loader, validate_loader, dataset_properties: DatasetProperties,
                        encoder_properties: EncoderProperties, pretrained_encoder_path, batch_size):
 
     num_epochs = 30
@@ -199,19 +199,10 @@ def train_encoder_only(train_loader, validate_loader, dataset_properties: Datase
     shown = False
 
     #input_dim = 8 + len(attribs)
-    if encoder_properties.encoder_type == EncType.CNNEncoder:
-        model = ConvNet(dataset_properties, encoder_properties,)
-    elif encoder_properties.encoder_type == EncType.LSTMEncoder:
-        model = SimpleLSTM(dataset_properties, encoder_properties,
-                           batch_size=batch_size)
-    else:
-        raise Exception("Unhandled network structure")
-
-    model = model.double()
 
     # Loss and optimizer
     criterion = nn.SmoothL1Loss()
-    optimizer = torch.optim.Adam(model.parameters(),
+    optimizer = torch.optim.Adam(encoder.parameters(),
                                  lr=learning_rate, weight_decay=weight_decay)
 
     # Train the model
@@ -222,21 +213,21 @@ def train_encoder_only(train_loader, validate_loader, dataset_properties: Datase
     #hyd_data_labels = train_loader.hyd_data_labels
     for epoch in range(num_epochs):
         #datapoints: list[DataPoint]
-        model.train()
+        encoder.train()
         for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
             # Run the forward pass
             #hyd_data_labels = train_loader.hyd_data_labels
             hyd_data = encoder_properties.select_encoder_inputs(datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
 
             if encoder_properties.encoder_type == EncType.LSTMEncoder:
-                model.hidden = model.init_hidden()
+                encoder.hidden = encoder.init_hidden()
 
             #elif epoch == 0:
             #    hyd_data = only_rain(hyd_data)
 
             #flow = hyd_data[:, :, :]
             #outputs = model(flow)
-            outputs = model(hyd_data)
+            outputs = encoder(hyd_data)
             if torch.max(np.isnan(outputs.data)) == 1:
                 raise Exception('nan generated')
             signatures_ref = datapoints.signatures_tensor()  # np.squeeze(signatures)  # signatures is b x s x ?
@@ -309,14 +300,14 @@ def train_encoder_only(train_loader, validate_loader, dataset_properties: Datase
                 fig.show()
 
         # Test the model
-        model.eval()
+        encoder.eval()
         with torch.no_grad():
             validation_loss = []
             baseline_loss = []
             rel_error = None
             for idx, datapoints in enumerate(validate_loader):  #TODO we need to enumerate and batch the correct datapoints
                 hyd_data = encoder_properties.select_encoder_inputs(datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
-                outputs = model(hyd_data)
+                outputs = encoder(hyd_data)
                 signatures_ref = datapoints.signatures_tensor()
                 error = criterion(outputs, signatures_ref).item()
                 error_bl = criterion(0*outputs, signatures_ref).item()  # relative to predicting 0 for everything
@@ -334,7 +325,7 @@ def train_encoder_only(train_loader, validate_loader, dataset_properties: Datase
 
         #np.linalg.norm(error_test, axis=0)
         # Save the model and plot
-        torch.save(model.state_dict(), pretrained_encoder_path)
+        torch.save(encoder.state_dict(), pretrained_encoder_path)
 
         while(len(validation_loss_list) < len(loss_list)):
             validation_loss_list += validation_loss
@@ -372,26 +363,35 @@ def validate(dataloader, encoder, decoder):
     return
 
 
-def setup_encoder_decoder(encoder_input_dim, decoder_input_dim, pretrained_encoder_path, encoder_layers, encoding_dim,
-                          hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim, hyd_data_labels):
-    encoder = SimpleLSTM(input_dim=encoder_input_dim, hidden_dim=hidden_dim, batch_size=batch_size, output_dim=num_sigs,
-                         num_layers=encoder_layers, encoding_dim=encoding_dim).double()
+def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_properties: DatasetProperties,
+                          decoder_properties: DecoderProperties, batch_size: int): #, encoder_layers, encoding_dim, hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim, hyd_data_labels):
 
-    decoder_input_dim = decoder_input_dim + encoding_dim - 1  # -1 for flow
-    decoder_hidden_dim = 100
-    output_dim = 1
-    output_layers = 2
+    if encoder_properties.encoder_type == EncType.CNNEncoder:
+        encoder = ConvNet(dataset_properties, encoder_properties,).double()
+    elif encoder_properties.encoder_type == EncType.LSTMEncoder:
+        encoder = SimpleLSTM(dataset_properties, encoder_properties,
+                           batch_size=batch_size).double()
+    else:
+        encoder = None
+        #raise Exception("Unhandled network structure")
 
-    if encoding_dim > 0:
-        encoder.load_state_dict(torch.load(pretrained_encoder_path))
-        encoder.output_encoding = True
+    decoder_input_dim = encoder_properties.encoding_dim() + len(dataset_properties.attrib_normalizers) \
+                        + len(dataset_properties.climate_norm)
+
+    #decoder_hidden_dim = 100
+    #output_dim = 1
+    #output_layers = 2
+
+    #if encoding_dim > 0:
+    #    encoder.load_state_dict(torch.load(pretrained_encoder_path))
+    #    encoder.output_encoding = True
 
     decoder = None
-    if decoder_model_type == DecoderType.LSTM:
-        decoder = SimpleLSTM(input_dim=decoder_input_dim, hidden_dim=decoder_hidden_dim, batch_size=batch_size,
-                             output_dim=output_dim, num_layers=output_layers, encoding_dim=encoding_dim).double()
-    elif decoder_model_type == DecoderType.HydModel:
-        decoder = HydModelNet(decoder_input_dim, decoder_hidden_dim, store_dim, output_layers, True, hyd_data_labels)
+    if decoder_properties.decoder_model_type == DecoderType.LSTM:
+        decoder = SimpleLSTM(dataset_properties, encoder_properties, batch_size).double()
+
+    elif decoder_properties.decoder_model_type == DecoderType.HydModel:
+        decoder = HydModelNet(decoder_input_dim, decoder_properties.hyd_model_net_props, dataset_properties)
     decoder = decoder.double()
 
     return encoder, decoder
@@ -891,27 +891,26 @@ def train_test_everything():
         decoder_names = encoder_names
         decoder_indices = get_indices(decoder_names, hyd_data_labels)"""
     encoder_properties = EncoderProperties()
+    decoder_properties = DecoderProperties()
 
-    enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    enc.load_state_dict(torch.load(pretrained_encoder_path))
-    test_encoder(train_loader, enc, encoder_properties)
-    return
+    encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
-    if encoder_properties.encoder_type != EncType.NoEncoder:
-        train_encoder_only(train_loader, validate_loader=validate_loader, dataset_properties=
-                           dataset_properties, encoder_properties=encoder_properties,
-                           pretrained_encoder_path=pretrained_encoder_path, batch_size=batch_size)
-    return
+    #enc = ConvNet(dataset_properties, encoder_properties, ).double()
+    if False:
+        encoder.load_state_dict(torch.load(pretrained_encoder_path))
+        test_encoder(train_loader, encoder, encoder_properties)
+        return
 
-    encoder, decoder = setup_encoder_decoder(encoder_input_dim=encoder_input_dim, decoder_input_dim=input_dim,
-                                             pretrained_encoder_path=pretrained_encoder_path,
-                                             encoder_layers=encoding_num_layers, encoding_dim=encoding_dim,
-                                             hidden_dim=encoding_hidden_dim, num_sigs=num_sigs,
-                                             batch_size=batch_size, decoder_model_type=decoder_model_type,
-                                             store_dim=store_dim, hyd_data_labels=hyd_data_labels)
+    if False:
+        if encoder_properties.encoder_type != EncType.NoEncoder:
+            train_encoder_only(encoder, train_loader, validate_loader=validate_loader, dataset_properties=
+                               dataset_properties, encoder_properties=encoder_properties,
+                               pretrained_encoder_path=pretrained_encoder_path, batch_size=batch_size)
+        return
 
-    input_size = input_dim + encoding_dim
-    index_temp_minmax = (get_indices(['tmin(C)'], hyd_data_labels)[0], get_indices(['tmax(C)'], hyd_data_labels)[0])
+    #Need to move to decoder_properties etc here too...
+    #input_size = input_dim + encoding_dim
+    move me index_temp_minmax = (get_indices(['tmin(C)'], hyd_data_labels)[0], get_indices(['tmax(C)'], hyd_data_labels)[0])
 
     decoder = train_decoder_only_fakedata(decoder, train_loader, input_size, store_dim, batch_size, index_temp_minmax,
                                           0.1)

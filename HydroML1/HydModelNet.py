@@ -6,28 +6,33 @@ import numpy as np
 
 class HydModelNet(nn.Module):
 
-    def __init__(self, input_dim, hidden_dim, store_dim,
-                 num_layers, flow_between_stores, hyd_data_labels):
+    def __init__(self, input_dim, decoder_properties: DecoderProperties.HydModelNetProperties,
+                 dataset_properties: DatasetProperties):
         super(HydModelNet, self).__init__()
 
-        input_plus_stores_dim = input_dim + store_dim
-        self.flow_between_stores = flow_between_stores
+        self.decoder_properties = decoder_properties
+        self.dataset_properties = dataset_properties
+
+        input_plus_stores_dim = input_dim + self.store_dim()
+        self.flow_between_stores = decoder_properties.flow_between_stores
         self.dropout = nn.Dropout(0.5)
-        self.flownet = self.make_flow_net(num_layers, input_plus_stores_dim, hidden_dim)
+        self.flownet = self.make_flow_net(decoder_properties.num_layers, input_plus_stores_dim, decoder_properties.hidden_dim)
 
-        self.store_outflow_dim = store_dim*(store_dim+2) if flow_between_stores else store_dim
+        self.store_outflow_dim = self.store_dim()*(self.store_dim()+2) if decoder_properties.flow_between_stores \
+            else self.store_dim()
         #self.outflow = self.make_outflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_outflow_dim)
-        self.store_dim = store_dim
-        self.stores = torch.zeros([store_dim])
-        self.hyd_data_labels = hyd_data_labels
+        self.stores = torch.zeros([self.store_dim()])
+        #self.hyd_data_labels = hyd_data_labels
 
-        self.outflow_layer = self.make_outflow_layer(hidden_dim, self.store_outflow_dim)
-        self.inflow_layer = self.make_inflow_layer(hidden_dim, store_dim+1)
+        self.outflow_layer = self.make_outflow_layer(decoder_properties.hidden_dim, self.store_outflow_dim)
+        self.inflow_layer = self.make_inflow_layer(decoder_properties.hidden_dim, self.store_dim()+1) # +1 for rain
 
         self.inflowlog = None
         self.outflowlog = None
 
         #def parameters(self, recurse=True):
+    def store_dim(self):
+        return self.decoder_properties.Indices.STORE_DIM
 
     def make_flow_net(self, num_layers, input_dim, hidden_dim):
         layers = []
@@ -56,14 +61,15 @@ class HydModelNet(nn.Module):
 
     def init_stores(self, batch_size):
         self.stores = torch.zeros([batch_size, self.store_dim]).double()
-        self.stores[:, Indices.SLOW_STORE] = 0
         self.stores[:, 1] = 1  # Start with some non-empty stores (deep, snow)
+        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 0
 
     def correct_init_baseflow(self, flow, store_coeff):
         baseflow = np.percentile(flow, 25, axis=0)  # flow is t x b
         # Want store_coeff*slowstore = baseflow
-        self.stores[:, Indices.SLOW_STORE] = torch.from_numpy(baseflow / np.maximum(store_coeff.detach().numpy(), 0.00001))
-        print(f"Init slow store {self.stores[0, Indices.SLOW_STORE]} from baseflow {baseflow[0]}/coeff {store_coeff[0]}")
+        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = torch.from_numpy(baseflow / np.maximum(store_coeff.detach().numpy(), 0.00001))
+        print(f"Init slow store {self.stores[0, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE]} from "
+              f"baseflow {baseflow[0]}/coeff {store_coeff[0]}")
 
     #def init_hidden(self):
         # This is what we'll initialise our hidden state as
@@ -72,8 +78,10 @@ class HydModelNet(nn.Module):
     def forward(self, hyd_input):  # hyd_input is t x b x i
         flow = hyd_input[:, :, 0]
         hyd_input = hyd_input[:, :, 1:]
-        idx_rain = get_indices(['prcp(mm/day)'], self.hyd_data_labels)[0]
+        idx_rain = get_indices(['prcp(mm/day)'], self.dataset_properties.climate_norm.keys())[0] + 1 # +1 because flow in here too
+
         rain = hyd_input[:, :, idx_rain-1]  # rain is t x b
+        todo(not(sure))
         steps = hyd_input.shape[0]
         batch_size = hyd_input.shape[1]
         flows = torch.zeros([steps, batch_size]).double()

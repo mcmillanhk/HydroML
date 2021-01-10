@@ -113,15 +113,7 @@ class CamelsDataset(Dataset):
         for name, normalizer in sigs.items():
             self.signatures_frame[name] = self.signatures_frame[name].transform(lambda x: x * normalizer)
 
-        self.climate_norm = {
-            'dayl(s)': 0.00002,
-            'prcp(mm/day)': 1,
-            'srad(W / m2)': 0.005,
-            'swe(mm)': 1,
-            'tmax(C)': 0.1,
-            'tmin(C)': 0.1,
-            'vp(Pa)': 0.001,
-        }
+        #self.dataset_properties = dataset_properties??
 
         """Check amount of flow data for each site and build a table of this"""
         self.siteyears = pd.DataFrame(index=self.signatures_frame.iloc[:, 0],
@@ -148,12 +140,16 @@ class CamelsDataset(Dataset):
             climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
                                        usecols=[0, 1, 2, 3, 4, 5, 6, 7],
                                        parse_dates=True,
-                                       names=["date", "dayl(s)", "prcp(mm/day)", "srad(W / m2)", "swe(mm)",
-                                              "tmax(C)", "tmin(C)", "vp(Pa)"])
+                                       names=["date"] + list(dataset_properties.climate_norm.keys()))
+            #climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=3, parse_dates=True)
             climate_data['date'] = pd.to_datetime(climate_data['date'], format='%Y %m %d %H')  # - pd.Timedelta('12 hours')
             climate_data['date'] = climate_data['date'].apply(lambda x: x.date())
 
-            for name, normalizer in self.climate_norm.items():
+            if len(dataset_properties.climate_norm)+1 != len(climate_data.columns):
+                raise Exception("Length of DatasetProperties.climate_norm must match number of columns loaded, "
+                                "excluding date (TODO add code to remove unwanted columns if needed)")
+
+            for name, normalizer in dataset_properties.climate_norm.items():
                 climate_data[name] = climate_data[name].transform(lambda x: x * normalizer)
 
             #flow_data = flow_data[flow_data.qc != 'M']
@@ -384,7 +380,7 @@ class CamelsDataset(Dataset):
                                    self.climate_norm.loc["dayl", "std"])
         climate_data["vp(Pa)"] = ((climate_data["vp(Pa)"] - self.climate_norm.loc["vp", "mean"]) /
                                   self.climate_norm.loc["vp", "std"])
-        climate_data["srad(W / m2)"] = ((climate_data["srad(W / m2)"] - self.climate_norm.loc["srad", "mean"]) /
+        climate_data["srad(W/m2)"] = ((climate_data["srad(W/m2)"] - self.climate_norm.loc["srad", "mean"]) /
                                         self.climate_norm.loc["srad", "std"])
         if self.normalize_inputs:
             climate_data["prcp(mm / day)"] = ((climate_data["prcp(mm / day)"]) /

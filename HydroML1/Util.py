@@ -53,6 +53,17 @@ class DatasetProperties:
         'zero_q_freq': 0.05,
         'hfd_mean': 0.01,
     }
+
+    climate_norm = {
+        'dayl(s)': 0.00002,
+        'prcp(mm/day)': 1,
+        'srad(W/m2)': 0.005,
+        'swe(mm)': 1,
+        'tmax(C)': 0.1,
+        'tmin(C)': 0.1,
+        'vp(Pa)': 0.001,
+    }
+
     def num_sigs(self): return len(self.sig_normalizers)
 
     def sig_index(self, name): return list(self.sig_normalizers.keys()).index(name)
@@ -94,7 +105,7 @@ class DecoderType(Enum):
     ConvNet = 1
     HydModel = 2
 
-# Properties common to all encoders.
+# Properties common to all decoders.
 class DecoderProperties:
 
     decoder_model_type = DecoderType.HydModel
@@ -105,6 +116,11 @@ class DecoderProperties:
             STORE_DIM = 4  # 4 is probably the minimum: snow, deep, shallow, runoff
             SLOW_STORE = 0
             SNOW_STORE = STORE_DIM-1
+
+        hidden_dim = 100
+        output_dim = 1
+        num_layers = 2
+        flow_between_stores = True  #Allow flow between stores; otherwise they're all connected only to out flow
 
     hyd_model_net_props = HydModelNetProperties()
 
