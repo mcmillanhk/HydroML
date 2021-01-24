@@ -68,6 +68,15 @@ class DatasetProperties:
 
     def sig_index(self, name): return list(self.sig_normalizers.keys()).index(name)
 
+    def temperatures(self, datapoint: DataPoint):
+        temps = np.zeros([datapoint.climate_data.shape[0], 2, datapoint.climate_data.shape[2]])
+        idx = get_indices(['tmin(C)'], datapoint.climate_data_cols)[0]
+        temps[:, 0, :] = datapoint.climate_data[:, idx, :] / self.climate_norm['tmin(C)']
+        idx = get_indices(['tmax(C)'], datapoint.climate_data_cols)[0]
+        temps[:, 1, :] = datapoint.climate_data[:, idx, :] / self.climate_norm['tmax(C)']
+        return temps
+
+
 
 class EncoderProperties:
     encoder_type = EncType.CNNEncoder
@@ -115,12 +124,54 @@ class DecoderProperties:
         class Indices:  # TODO still hardcoded in expected_b code
             STORE_DIM = 4  # 4 is probably the minimum: snow, deep, shallow, runoff
             SLOW_STORE = 0
+            SLOW_STORE2 = 1 # a bit faster
             SNOW_STORE = STORE_DIM-1
 
         hidden_dim = 100
         output_dim = 1
         num_layers = 2
         flow_between_stores = True  #Allow flow between stores; otherwise they're all connected only to out flow
+
+        #should this come from the dataset properties or the datapoint?
+        #def input_dim(self, dataset_properties: DatasetProperties):
+        #    return dataset_properties.climate_norm.si
+        def input_dim1(datapoint: DataPoint, encoding_dim: int, store_size: int):
+            return datapoint.climate_data.shape[1] + datapoint.signatures.shape[1] + datapoint.attributes.shape[1] + \
+                   encoding_dim + store_size
+        def input_dim2(dataset_properties: DatasetProperties, encoding_dim: int, store_size: int):
+            return len(dataset_properties.climate_norm) + len(dataset_properties.sig_normalizers) \
+                + len(dataset_properties.attrib_normalizers) + encoding_dim + store_size
+
+        def select_input(datapoints: DataPoint, encoding, stores):
+            #raise Exception("todotodo check all these shapes") # t x i x b in caller
+            batchsize=datapoints.climate_data.shape[2]
+            timesteps=datapoints.climate_data.shape[0]
+            decoder_input_dim = DecoderProperties.HydModelNetProperties.input_dim1(datapoints, encoding.shape[1], stores.shape[1])
+            #decoder_input_dim2 = DecoderProperties.HydModelNetProperties.input_dim1(dataset_properties, encoding.shape[1],
+            #if decoder_input_dim != decoder_input_dim2:
+            #    raise Exception(f"Error calculating decoder_input_dim in 2 different ways decoder_input_dim="
+            #                    f"{decoder_input_dim} decoder_input_dim2={decoder_input_dim2}")
+            num_climate_attribs = datapoints.climate_data.shape[1]
+            num_signatures = datapoints.signatures.shape[1]
+            num_attributes = datapoints.attributes.shape[1]
+            encoding_dim = encoding.shape[1]
+            store_size = stores.shape[1]
+            climate_start_idx=0
+            sig_start_idx = climate_start_idx+num_climate_attribs
+            attrib_start_idx = sig_start_idx+num_signatures
+            encoding_start_idx = attrib_start_idx+num_attributes
+            store_start_idx = encoding_start_idx+encoding_dim
+
+            decoder_input = np.full([timesteps, decoder_input_dim, batchsize], np.nan)
+            decoder_input[:, climate_start_idx:sig_start_idx, :] = datapoints.climate_data
+            decoder_input[:, sig_start_idx:attrib_start_idx, :] = np.expand_dims(np.transpose(np.array(datapoints.signatures)), 0)
+            decoder_input[:, attrib_start_idx:encoding_start_idx, :] = np.expand_dims(np.transpose(np.array(datapoints.attributes)), 0)
+            decoder_input[:, encoding_start_idx:store_start_idx, :] = encoding
+            decoder_input[:, store_start_idx:(store_start_idx+store_size), :] = stores
+            if np.isnan(decoder_input).any().any():
+                raise Exception("Failed to fill decoder_input")
+
+            return torch.from_numpy(decoder_input)
 
     hyd_model_net_props = HydModelNetProperties()
 

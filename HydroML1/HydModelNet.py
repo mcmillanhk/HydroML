@@ -13,10 +13,10 @@ class HydModelNet(nn.Module):
         self.decoder_properties = decoder_properties
         self.dataset_properties = dataset_properties
 
-        input_plus_stores_dim = input_dim + self.store_dim()
+        #input_plus_stores_dim = input_dim + self.store_dim()
         self.flow_between_stores = decoder_properties.flow_between_stores
         self.dropout = nn.Dropout(0.5)
-        self.flownet = self.make_flow_net(decoder_properties.num_layers, input_plus_stores_dim, decoder_properties.hidden_dim)
+        self.flownet = self.make_flow_net(decoder_properties.num_layers, input_dim, decoder_properties.hidden_dim)
 
         self.store_outflow_dim = self.store_dim()*(self.store_dim()+2) if decoder_properties.flow_between_stores \
             else self.store_dim()

@@ -375,8 +375,9 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
         encoder = None
         #raise Exception("Unhandled network structure")
 
-    decoder_input_dim = encoder_properties.encoding_dim() + len(dataset_properties.attrib_normalizers) \
-                        + len(dataset_properties.climate_norm)
+    decoder_input_dim = DecoderProperties.HydModelNetProperties.input_dim2(dataset_properties, encoder_properties.encoding_dim(), decoder_properties.hyd_model_net_props.Indices.STORE_DIM)
+    #    encoder_properties.encoding_dim() + len(dataset_properties.attrib_normalizers) \
+    #                    + len(dataset_properties.climate_norm)
 
     #decoder_hidden_dim = 100
     #output_dim = 1
@@ -406,8 +407,8 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
 #    return decoder
 
 
-def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, input_size, store_size, batch_size,
-                                index_temp_minmax, weight_temp):
+#input_size, store_size, batch_size, index_temp_minmax, weight_temp):
+def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_properties: DatasetProperties, decoder_properties: DecoderProperties, encoding_dim: int):
     coupled_learning_rate = 0.0003
 
     criterion = nn.MSELoss()  #  nn.MSELoss()
@@ -417,46 +418,63 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, input_size, 
                                  lr=coupled_learning_rate, weight_decay=weight_decay)
 
     loss_list = []
-    inflow_inputs = input_size + store_size
+    #inflow_inputs = input_size + store_size
+
+    #input_size = dataset_properties +
 
     runs = len(train_loader)
 
     #for epoch in range(runs):
-    for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
-        if hyd_data.shape[0] < batch_size:
-            continue
+    for i, datapoints in enumerate(train_loader):
+    #for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
+        #if datapoints.flow_data.shape[0] < batch_size:
+        #    continue
+        batch_size = datapoints.flow_data.shape[2]
+
+        # we know this from the
+        #decoder_full_input_size = decoder_properties.hyd_model_net_props.input_dim(datapoints)\
+        #     + encoding_dim + decoder_properties.hyd_model_net_props.STORE_DIM
+        store_size=decoder_properties.hyd_model_net_props.Indices.STORE_DIM
+        fake_encoding = np.random.uniform(-1, 1, [1, encoding_dim, batch_size])
+        fake_stores = np.random.uniform(0, 1, [1, store_size, batch_size])
+        #TODO make sure real stores are scaled to sensible range on input
+        decoder_input: torch.Tensor = DecoderProperties.HydModelNetProperties.select_input(datapoints, fake_encoding, fake_stores)
+        temperatures = dataset_properties.temperatures(datapoints)
 
         print(f"Batch {i} of {runs}")
+        #todo I'm working through this function making everything depend on the dataset_properties etc.
 
-        scale_stores = i > runs/2
-        numbers = list(range(hyd_data.shape[2]))
+        #scale_stores = i > runs/2
+        # 20 random timesteps
+        numbers = list(range(datapoints.flow_data.shape[0]))
         random.shuffle(numbers)
         numbers = numbers[:20]
         for sample in numbers:
-            inputs, inputs_no_flow = make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp,
-                                                      inflow_inputs, input_size, hyd_data[:, :, sample])
+            #decoder_inputs = make_fake_inputs(batch_size, scale_stores, dataset_properties, #index_temp_minmax, weight_temp,
+            #                                  inflow_inputs, input_size, datapoints, sample)
+
 
             #inputs = torch.cat((hyd_input[i, :, :], self.stores), 1)
-            outputs = decoder.flownet(inputs_no_flow)
+            outputs = decoder.flownet(decoder_input[sample,:,:].permute(1,0))  # decoder_input is t x i x b
             a = decoder.inflow_layer(outputs)  # a is b x stores
             #included in inflow_layer a = nn.Softmax()(a)
             expected_a = torch.zeros((batch_size, store_size+1)).double()
 
             b = decoder.outflow_layer(outputs)  # b x s+
 
-            snow_store_idx = store_size - 1
-            slow_store_idx = 0
-            slow_store_idx2 = 1
+            snow_store_idx = decoder_properties.hyd_model_net_props.Indices.SNOW_STORE
+            slow_store_idx = decoder_properties.hyd_model_net_props.Indices.SLOW_STORE
+            slow_store_idx2 = decoder_properties.hyd_model_net_props.Indices.SLOW_STORE2
             loss_idx_start = store_size * store_size
             loss_idx_end = loss_idx_start + store_size
-            outflow_idx_start = store_size * (store_size + 1)
+            outflow_idx_start = store_size * (store_size + 1)  # TODO move these calcs to decoder_properties
             outflow_idx_end = outflow_idx_start + store_size
 
             expected_b = torch.zeros((batch_size, store_size*(store_size+2))).double() + 0.001
             expected_b[:, outflow_idx_start:outflow_idx_end] = 0.2  # random?
 
             for batch_idx in range(batch_size):
-                temp = (inputs[batch_idx, index_temp_minmax[0]] + inputs[batch_idx, index_temp_minmax[1]])*0.5/weight_temp
+                temp = np.mean(temperatures[sample, :, batch_idx]) # (inputs[batch_idx, index_temp_minmax[0]] + inputs[batch_idx, index_temp_minmax[1]])*0.5/weight_temp
                 temp = temp + 4*(torch.rand(1)[0]-0.5)  # Make boundary fuzzy
                 snowfall = 0.95 if temp < 4 else 0.05
                 expected_a[batch_idx, :] = (1-snowfall) * 1.0/store_size
@@ -546,8 +564,10 @@ def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_
             fig.show()
     return decoder
 
-
-def make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp, inflow_inputs, input_size, hyd_data):
+#inflow_inputs = input_size-store_size
+# Need to copy the real data then fake the stores
+def make_fake_inputs(batch_size, scale_stores, dataset_properties, weight_temp, inflow_inputs, input_size,
+                     datapoint, sample_idx):
     inputs = torch.rand((batch_size, inflow_inputs)).double()  # b x i, Uniform[0,1]
     inputs[:, :input_size] = hyd_data
     if scale_stores:
@@ -910,10 +930,9 @@ def train_test_everything():
 
     #Need to move to decoder_properties etc here too...
     #input_size = input_dim + encoding_dim
-    move me index_temp_minmax = (get_indices(['tmin(C)'], hyd_data_labels)[0], get_indices(['tmax(C)'], hyd_data_labels)[0])
+    #move me index_temp_minmax = (get_indices(['tmin(C)'], hyd_data_labels)[0], get_indices(['tmax(C)'], hyd_data_labels)[0])
 
-    decoder = train_decoder_only_fakedata(decoder, train_loader, input_size, store_dim, batch_size, index_temp_minmax,
-                                          0.1)
+    decoder = train_decoder_only_fakedata(decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())
     #return
     #decoder = train_decoder_only_realdata(decoder, input_size, store_dim, batch_size, index_temp_minmax, 0.1)
     train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_indices=encoder_indices,

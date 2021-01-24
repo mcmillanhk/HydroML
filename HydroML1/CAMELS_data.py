@@ -199,13 +199,21 @@ class CamelsDataset(Dataset):
                 if climate_data_subset.date[0] != flow_date_start:
                     raise Exception("Flow data start doesn't match climate data start")
 
-                hyd_data = pd.concat([flow_data_subset.drop(['year', 'month', 'day'], axis=1),
+                """hyd_data = pd.concat([flow_data_subset.drop(['year', 'month', 'day'], axis=1),
                                       climate_data_subset.drop(['date'], axis=1)], axis=1, join='inner')
 
-                if hyd_data.shape[0] > dataset_properties.length_days:
-                    hyd_data.drop(hyd_data.tail(hyd_data.shape[0] - dataset_properties.length_days).index, inplace=True)
+                """
+                self.clamp_length(dataset_properties, flow_data_subset)
+                self.clamp_length(dataset_properties, climate_data_subset)
 
-                self.all_items.append(self.load_hyddata(gauge_id, flow_date_start, hyd_data))
+                self.all_items.append(self.load_hyddata(gauge_id, flow_date_start,
+                                                        flow_data_subset.drop(['year', 'month', 'day'], axis=1),
+                                                        climate_data_subset.drop(['date'], axis=1)))
+
+    def clamp_length(self, dataset_properties, flow_data_subset):
+        if flow_data_subset.shape[0] > dataset_properties.length_days:
+            flow_data_subset.drop(
+                flow_data_subset.tail(flow_data_subset.shape[0] - dataset_properties.length_days).index, inplace=True)
 
     def get_subdir_filename(self, root_dir, gauge_id, file_suffix):
         flow_file = gauge_id + file_suffix
@@ -236,9 +244,10 @@ class CamelsDataset(Dataset):
         if hyd_data.isnull().any().any() or hyd_data.isin([-999]).any().any():
             raise Exception('nan in hyd data')
 
+    """
     def load_item(self, idx):
         print('load ', idx, '/', self.num_samples)
-        """Allow for each site corresponding to multiple samples"""
+        "" "Allow for each site corresponding to multiple samples" ""
         idx_site = self.siteyears.index.get_loc(self.siteyears.index[self.siteyears['RunningTotal'] > idx][0])
         if idx_site == 0:
             idx_within_site = idx
@@ -246,7 +255,7 @@ class CamelsDataset(Dataset):
             idx_within_site = idx - self.siteyears.iloc[idx_site - 1, 4]
         #  print("idx = ", idx, "idx_site = ", idx_site, ", idx_within_site = ", idx_within_site)
 
-        """Get file names for climate and flow"""
+        "" "Get file names for climate and flow" ""
         gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
         climate_data, flow_data, flow_data_ymd = self.load_flow_climate_csv(gauge_id)
         raise Exception("Sort out water year dates")
@@ -262,13 +271,13 @@ class CamelsDataset(Dataset):
 
         #  print("Extracted Flow Data")
 
-        """Normalize flow data"""
-        """First to mm/d"""
+        " ""Normalize flow data" ""
+        " ""First to mm/d" ""
 
-        """if self.normalize_inputs:
+        " ""if self.normalize_inputs:
             ""Then normalize""
             flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0, 0])/self.flow_norm.iloc[0, 1])
-            """
+            " ""
 
         climate_data = climate_data.loc[(climate_data['date'] >= flow_date_start) &
                                         (climate_data['date'] <= flow_date_end)]
@@ -280,22 +289,23 @@ class CamelsDataset(Dataset):
         #self.check_dataframe(flow_data)
         #self.check_dataframe(climate_data)
 
-        """Merge climate and flow into one array"""
-        hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date'  #, 'swe(mm)'
-                                                                                 ], axis=1)], axis=1, join='inner')
-        self.check_dataframe(hyd_data)
+        " ""Merge climate and flow into one array" "" #TODO do this in the datapoint instead, only for encoder
+        #hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date'  #, 'swe(mm)'
+        #                                                                         ], axis=1)], axis=1, join='inner')
+        self.check_dataframe(flow_data)
+        self.check_dataframe(climate_data)
 
-        return self.load_hyddata(gauge_id, flow_date_start, hyd_data)
+        return self.load_hyddata(gauge_id, flow_date_start, flow_data, climate_data)"""
 
-    def load_hyddata(self, gauge_id, flow_date_start, hyd_data):
+    def load_hyddata(self, gauge_id, flow_date_start, flow_data, climate_data):
         flow_area = self.area_data.loc[gauge_id, 'area_gages2']
-        hyd_data["flow(cfs)"] = hyd_data["flow(cfs)"] * cfs2mm / flow_area
+        flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * cfs2mm / flow_area
 
-        hyd_data = hyd_data.drop('qc', axis=1)
+        flow_data = flow_data.drop('qc', axis=1)
         #self.check_dataframe(hyd_data)
 
         #print('Load ' + gauge_id)
-        attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == int(gauge_id)]
+        attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == int(gauge_id)].drop('gauge_id', axis=1)
         """for key in attribs.columns:
             if key != 'gauge_id':
                 hyd_data[key] = attribs[key].iloc[0]"""
@@ -336,7 +346,7 @@ class CamelsDataset(Dataset):
         latlong = self.latlong.loc[self.latlong['gauge_id'] == float(gauge_id)]
 
 
-        return DataPoint(gauge_id+str(flow_date_start), np.array(hyd_data), hyd_data.columns.tolist(), signatures,
+        return DataPoint(gauge_id+'-'+str(flow_date_start), np.array(flow_data), flow_data.columns.tolist(), np.array(climate_data), climate_data.columns.tolist(), signatures,
                          attribs, latlong)
 
     def load_flow_climate_csv(self, gauge_id):
