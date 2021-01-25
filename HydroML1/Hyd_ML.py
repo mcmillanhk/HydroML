@@ -501,7 +501,7 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
             loss.backward()
             optimizer.step()
 
-        if True or i % 50 == 0:
+        if i % 50 == 0:
             fig = plt.figure()
             ax_a = fig.add_subplot(3, 1, 1)
             ax_b = fig.add_subplot(3, 1, 2)
@@ -531,7 +531,7 @@ def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_
     loss_list = []
     inflow_inputs = input_size + store_size
 
-    runs = 2000
+    runs = 20
     for epoch in range(runs):
         scale_stores = epoch > runs/2
         inputs, inputs_no_flow = make_fake_inputs(batch_size, scale_stores, index_temp, weight_temp, inflow_inputs, input_size)
@@ -896,7 +896,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=100, batch_size=batch_size)
+        = load_inputs(subsample_data=1, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
@@ -941,7 +941,7 @@ def train_test_everything():
         return
 
 
-    if False:
+    if True:
         decoder = train_decoder_only_fakedata(decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())
 
     train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
