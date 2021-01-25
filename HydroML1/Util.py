@@ -9,7 +9,7 @@ from typing import List
 class EncType(Enum):
     NoEncoder = 0
     LSTMEncoder = 1
-    CNNEncoder = 2  # not implemented yet
+    CNNEncoder = 2
 
 
 class DatasetProperties:
@@ -56,7 +56,7 @@ class DatasetProperties:
 
     climate_norm = {
         'dayl(s)': 0.00002,
-        'prcp(mm/day)': 1,
+        'prcp(mm/day)': 1,  # we assume this is 1 in a couple places
         'srad(W/m2)': 0.005,
         'swe(mm)': 1,
         'tmax(C)': 0.1,
@@ -76,14 +76,17 @@ class DatasetProperties:
         temps[:, 1, :] = datapoint.climate_data[:, idx, :] / self.climate_norm['tmax(C)']
         return temps
 
+    def get_rain(self, datapoints: DataPoint):
+        idx_rain = get_indices(['prcp(mm/day)'], self.climate_norm.keys())[0]
+        return torch.from_numpy(datapoints.climate_data[:, idx_rain, :])  # rain is t x b
 
 
 class EncoderProperties:
     encoder_type = EncType.CNNEncoder
-    encoder_names = ["prcp(mm/day)", 'flow(cfs)', "tmax(C)"]  # "swe(mm)",
+    encoder_names = ["prcp(mm/day)", "tmax(C)"]  # "swe(mm)",'flow(cfs)',
     # encoder_indices = get_indices(encoder_names, hyd_data_labels)
     # indices = list(hyd_data_labels).index()
-    def encoder_input_dim(self): return len(self.encoder_names)
+    def encoder_input_dim(self): return len(self.encoder_names)+1  # +1 for flow
 
     encoding_num_layers = 2
     encoding_hidden_dim = 100
@@ -103,10 +106,11 @@ class EncoderProperties:
         else:
             raise Exception("Encoder disabled or case not handled")
 
-    def select_encoder_inputs(self, datapoint: DataPoint):
-
-        return torch.tensor(datapoint.hydro_data[:, [datapoint.hydro_data_cols.index(name)
-                                                     for name in self.encoder_names], :]).permute(self.encoder_perm())
+    def select_encoder_inputs(self, datapoint: DataPoint, dataset_properties: DatasetProperties):
+        indices = get_indices(self.encoder_names, dataset_properties.climate_norm.keys())
+        return torch.tensor(np.concatenate((datapoint.flow_data, datapoint.climate_data[:, indices, :]), axis=1))
+        #return torch.tensor(datapoint.hydro_data[:, [datapoint.flow_data_cols.index(name)
+        #                                             for name in self.encoder_names], :]).permute(self.encoder_perm())
         #return [self.select_one_encoder_inputs(datapoint) for datapoint in datapoints]
 
 class DecoderType(Enum):
@@ -125,7 +129,13 @@ class DecoderProperties:
             STORE_DIM = 4  # 4 is probably the minimum: snow, deep, shallow, runoff
             SLOW_STORE = 0
             SLOW_STORE2 = 1 # a bit faster
+            SURFACE_STORE = 2
             SNOW_STORE = STORE_DIM-1
+
+        def __init__(self):
+            self.store_weights = torch.ones((1, self.Indices.STORE_DIM))*0.001
+            self.store_weights[0, self.Indices.SURFACE_STORE]=0.1
+            self.store_weights[0, self.Indices.SNOW_STORE]=0.01
 
         hidden_dim = 100
         output_dim = 1

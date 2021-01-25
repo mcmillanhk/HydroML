@@ -60,9 +60,9 @@ class HydModelNet(nn.Module):
         return nn.Sequential(*layers)
 
     def init_stores(self, batch_size):
-        self.stores = torch.zeros([batch_size, self.store_dim]).double()
-        self.stores[:, 1] = 1  # Start with some non-empty stores (deep, snow)
-        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 0
+        self.stores = torch.zeros((batch_size, self.store_dim())).double()
+        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 1000  # Start with some non-empty stores (deep, snow)
+        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE2] = 100
 
     def correct_init_baseflow(self, flow, store_coeff):
         baseflow = np.percentile(flow, 25, axis=0)  # flow is t x b
@@ -75,15 +75,16 @@ class HydModelNet(nn.Module):
         # This is what we'll initialise our hidden state as
         #return (torch.zeros(self.num_layers, self.batch_size, self.hidden_dim),
         #        torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
-    def forward(self, hyd_input):  # hyd_input is t x b x i
-        flow = hyd_input[:, :, 0]
-        hyd_input = hyd_input[:, :, 1:]
-        idx_rain = get_indices(['prcp(mm/day)'], self.dataset_properties.climate_norm.keys())[0] + 1 # +1 because flow in here too
+    def forward(self, tuple1):  # hyd_input is t x b x i
+        (datapoints, encoding) = tuple1
+        #flow = hyd_input[:, :, 0]
+        #hyd_input = hyd_input[:, :, 1:]
+        idx_rain = get_indices(['prcp(mm/day)'], self.dataset_properties.climate_norm.keys())[0]
+        rain = torch.from_numpy(datapoints.climate_data[:, idx_rain, :])  # rain is t x b
 
-        rain = hyd_input[:, :, idx_rain-1]  # rain is t x b
-        todo(not(sure))
-        steps = hyd_input.shape[0]
-        batch_size = hyd_input.shape[1]
+        #todo(not(sure))
+        steps = rain.shape[0]
+        batch_size = rain.shape[1]
         flows = torch.zeros([steps, batch_size]).double()
 
         self.init_stores(batch_size)
@@ -91,8 +92,13 @@ class HydModelNet(nn.Module):
         self.inflowlog = np.zeros((steps, self.stores.shape[1]+1))
         self.outflowlog = np.zeros((steps, self.store_outflow_dim))
 
+        fixed_data = torch.cat((torch.tensor(np.array(datapoints.signatures)),
+                                torch.tensor(np.array(datapoints.attributes)), encoding), 1)
+
         for i in range(steps):
-            inputs = torch.cat((hyd_input[i, :, :], 0.01*self.stores), 1)
+            inputs = torch.cat((torch.tensor(np.transpose(datapoints.climate_data[i, :, :])), fixed_data,
+                                  self.decoder_properties.store_weights*self.stores), 1)  # b x i
+            #inputs = torch.cat((torch.from_numpy(datapoints.climate_data[i, :, :]), self.decoder_properties.store_weights*self.stores), 1)
             outputs = self.flownet(inputs)
             a = self.inflow_layer(outputs)
             #a = nn.Softmax()(a)  # a is b x stores
@@ -139,7 +145,8 @@ class HydModelNet(nn.Module):
 
             if i == 0:
                 #print(f"b_flow={b_flow[0,:]} stores={self.stores[0,:]}")
-                self.correct_init_baseflow(flow, b_flow[:, Indices.SLOW_STORE])
+                flow = datapoints.flow_data[:, 0, :]
+                self.correct_init_baseflow(flow, b_flow[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE])
 
         if flows.min() < 0:
             raise Exception("Negative flow")
