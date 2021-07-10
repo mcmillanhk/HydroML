@@ -125,7 +125,7 @@ class DecoderProperties:
 
     #Properties specific to HydModelNet
     class HydModelNetProperties:
-        class Indices:  # TODO still hardcoded in expected_b code
+        class Indices:
             STORE_DIM = 4  # 4 is probably the minimum: snow, deep, shallow, runoff
             SLOW_STORE = 0
             SLOW_STORE2 = 1 # a bit faster
@@ -133,14 +133,32 @@ class DecoderProperties:
             SNOW_STORE = STORE_DIM-1
 
         def __init__(self):
+            #store_weights normalize stores when used as input
             self.store_weights = torch.ones((1, self.Indices.STORE_DIM))*0.001
             self.store_weights[0, self.Indices.SURFACE_STORE]=0.1
             self.store_weights[0, self.Indices.SNOW_STORE]=0.01
 
+            # If scale_b then outflow_weights weight output from b so that we're predicting numbers with similar
+            # magnitude for all pathways (first STORE_DIM^2 are between stores (if flow_between_stores), then STORE_DIM
+            # are loss, then the final STORE_DIM are the store outputs
+            self.outflow_weights = torch.ones((1, self.b_length()))*0.01
+
+            store_outflow_weights = torch.ones((self.Indices.STORE_DIM))
+            store_outflow_weights[self.Indices.SLOW_STORE]=0.01
+            store_outflow_weights[self.Indices.SLOW_STORE2] = 0.05
+            store_outflow_weights[self.Indices.SNOW_STORE] = 0.2
+            store_outflow_weights[self.Indices.SURFACE_STORE] = 1
+
+            self.outflow_weights[0, -self.Indices.STORE_DIM:] = store_outflow_weights
+
+        scale_b = True
         hidden_dim = 100
         output_dim = 1
         num_layers = 2
         flow_between_stores = True  #Allow flow between stores; otherwise they're all connected only to out flow
+        def b_length(self):
+            return self.Indices.STORE_DIM * (self.Indices.STORE_DIM + 2) if self.flow_between_stores \
+                else self.Indices.STORE_DIM
 
         #should this come from the dataset properties or the datapoint?
         #def input_dim(self, dataset_properties: DatasetProperties):

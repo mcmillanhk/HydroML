@@ -18,13 +18,12 @@ class HydModelNet(nn.Module):
         self.dropout = nn.Dropout(0.5)
         self.flownet = self.make_flow_net(decoder_properties.num_layers, input_dim, decoder_properties.hidden_dim)
 
-        self.store_outflow_dim = self.store_dim()*(self.store_dim()+2) if decoder_properties.flow_between_stores \
-            else self.store_dim()
+        self.store_outflow_dim = self.decoder_properties.b_length()
         #self.outflow = self.make_outflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_outflow_dim)
         self.stores = torch.zeros([self.store_dim()])
         #self.hyd_data_labels = hyd_data_labels
 
-        self.outflow_layer = self.make_outflow_layer(decoder_properties.hidden_dim, self.store_outflow_dim)
+        self.outflow_layer = self.make_outflow_layer(self.store_outflow_dim, decoder_properties)
         self.inflow_layer = self.make_inflow_layer(decoder_properties.hidden_dim, self.store_dim()+1) # +1 for rain
 
         self.inflowlog = None
@@ -46,10 +45,16 @@ class HydModelNet(nn.Module):
         return nn.Sequential(*layers)
 
     @staticmethod
-    def make_outflow_layer(hidden_dim, output_dim):
-        layer = nn.Linear(hidden_dim, output_dim)
-        layer.bias.data -= 3  # Make the initial values generally small
-        layers = [layer, nn.Sigmoid()]  # output in 0..1
+    def make_outflow_layer(output_dim, decoder_properties: DecoderProperties.HydModelNetProperties):
+        layer = nn.Linear(decoder_properties.hidden_dim, output_dim)
+
+        if decoder_properties.scale_b: # now we weight the output instead
+            #layers = [layer, nn.ReLU()]  # output >=0
+            layers = [layer, nn.Softplus()]  # output >=0
+        else:
+            layer.bias.data -= 3  # Make the initial values generally small
+            layers = [layer, nn.Sigmoid()]  # output in 0..1
+
         return nn.Sequential(*layers)
 
     @staticmethod
@@ -114,7 +119,11 @@ class HydModelNet(nn.Module):
             self.stores = self.stores + rain_distn  # stores is b x s
 
             #b = self.outflow(inputs)  # b x s+
-            b = self.outflow_layer(outputs)
+            if self.decoder_properties.scale_b:
+                b = torch.clamp(self.decoder_properties.outflow_weights*self.outflow_layer(outputs), max=1)
+            else:
+                b = self.outflow_layer(outputs)
+
             self.outflowlog[i, :] = b[0, :].detach()
 
             if b.min() < 0 or b.max() > 1:

@@ -436,7 +436,7 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
     #for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
         #if datapoints.flow_data.shape[0] < batch_size:
         #    continue
-        batch_size = datapoints.flow_data.shape[2]
+        batch_size: int = datapoints.flow_data.shape[2]
 
         # we know this from the
         #decoder_full_input_size = decoder_properties.hyd_model_net_props.input_dim(datapoints)\
@@ -480,6 +480,7 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
             expected_b = torch.zeros((batch_size, store_size*(store_size+2))).double() + 0.001
             expected_b[:, outflow_idx_start:outflow_idx_end] = 0.2  # random?
 
+            snowmelt = np.zeros((batch_size))
             for batch_idx in range(batch_size):
                 temp = np.mean(temperatures[sample, :, batch_idx]) # (inputs[batch_idx, index_temp_minmax[0]] + inputs[batch_idx, index_temp_minmax[1]])*0.5/weight_temp
                 temp = temp + 4*(torch.rand(1)[0]-0.5)  # Make boundary fuzzy
@@ -487,13 +488,19 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
                 expected_a[batch_idx, :] = (1-snowfall) * 1.0/store_size
                 expected_a[batch_idx, store_size] = snowfall
 
-                snowmelt = max(float(temp), 2)/50
-                expected_b[batch_idx, outflow_idx_start + snow_store_idx] = snowmelt
+                snowmelt[batch_idx] = max(float(temp), 2)/50
+                expected_b[batch_idx, outflow_idx_start + snow_store_idx] = snowmelt[batch_idx]
                 expected_b[batch_idx, outflow_idx_start + slow_store_idx] = 0.001   # we really want this to be slow. Could start with -1 or
                                                                                     # something. And also all the other flows out of the slow store
                 expected_b[batch_idx, outflow_idx_start + slow_store_idx2] = 0.001
 
-            loss = criterion(a, expected_a) + criterion(b, expected_b)
+            loss = criterion(a, expected_a)
+            if decoder_properties.hyd_model_net_props.scale_b:
+                loss += criterion(b[:, outflow_idx_start + snow_store_idx], snowmelt/
+                                  decoder_properties.hyd_model_net_props.outflow_weights[0, outflow_idx_start + snow_store_idx])
+            else:
+                loss += criterion(b, expected_b)
+
             loss_list.append(loss.item())
 
             # Backprop and perform Adam optimisation
@@ -896,7 +903,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=1, batch_size=batch_size)
+        = load_inputs(subsample_data=10, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
