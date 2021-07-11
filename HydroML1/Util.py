@@ -155,10 +155,14 @@ class DecoderProperties:
         hidden_dim = 100
         output_dim = 1
         num_layers = 2
-        flow_between_stores = True  #Allow flow between stores; otherwise they're all connected only to out flow
+        flow_between_stores = False  #Allow flow between stores; otherwise they're all connected only to out flow
+
         def b_length(self):
             return self.Indices.STORE_DIM * (self.Indices.STORE_DIM + 2) if self.flow_between_stores \
                 else self.Indices.STORE_DIM
+
+        def store_idx_start(self):
+            return self.b_length()-self.Indices.STORE_DIM
 
         #should this come from the dataset properties or the datapoint?
         #def input_dim(self, dataset_properties: DatasetProperties):

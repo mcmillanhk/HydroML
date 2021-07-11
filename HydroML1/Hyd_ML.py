@@ -17,6 +17,20 @@ import shapefile as shp
 #from mpl_toolkits.basemap import Basemap, cm
 #import cartopy.crs as ccrs
 
+
+"""class SmoothL1Loss(_Loss):
+    __constants__ = ['reduction']
+
+    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
+        super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.smooth_l1_loss(input, target, reduction=self.reduction)"""
+def nse_loss(output, target):
+    return torch.sum((output - target)**2)/torch.sum(target**2)
+
+
+
 weight_decay = 0.001
 
 
@@ -300,7 +314,8 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                 ax2.plot(loss_list, color='b')
                 ax2.plot(moving_average(loss_list), color='#0000AA')
                 ax2.set_ylabel("train/val loss (blue/green)")
-                ax2 = ax1.twinx()
+                ax2.ylim(0, 1)
+                # ax2 = ax1.twinx()
                 if(len(validation_loss_list)>0):
                     ax2.plot(moving_average(validation_loss_list), color='#00AA00')
 
@@ -474,7 +489,7 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
             slow_store_idx2 = decoder_properties.hyd_model_net_props.Indices.SLOW_STORE2
             loss_idx_start = store_size * store_size
             loss_idx_end = loss_idx_start + store_size
-            outflow_idx_start = store_size * (store_size + 1)  # TODO move these calcs to decoder_properties
+            outflow_idx_start = decoder_properties.hyd_model_net_props.store_idx_start()
             outflow_idx_end = outflow_idx_start + store_size
 
             expected_b = torch.zeros((batch_size, store_size*(store_size+2))).double() + 0.001
@@ -678,7 +693,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     coupled_learning_rate = 0.0001  #0.000005
     output_epochs = 50
 
-    criterion = nn.SmoothL1Loss()  #  nn.MSELoss()
+    criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
     #params = list(decoder.parameters())
     #if encoder_type != EncType.NoEncoder:
@@ -760,13 +775,14 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             flow = datapoints.flow_data  # t x b
             _, loss = compute_loss(criterion, flow, outputs)
             temp_validate_loss_list.append(loss.item())
-            print(f'Validation loss {i} = {loss.item()}'
-                  .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
-                          str(np.around(error, decimals=3))))
-            fig = plt.figure(figsize=(18, 18))
-            ax_input = fig.add_subplot(1, 1, 1)
-            plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
-            fig.show()
+            if (i+1) % 50 == 0:
+                print(f'Validation loss {i} = {loss.item()}'
+                      .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
+                              str(np.around(error, decimals=3))))
+                fig = plt.figure(figsize=(18, 18))
+                ax_input = fig.add_subplot(1, 1, 1)
+                plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
+                fig.show()
 
         while len(validate_loss_list) < len(loss_list):
             validate_loss_list.extend(temp_validate_loss_list)
@@ -903,7 +919,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=10, batch_size=batch_size)
+        = load_inputs(subsample_data=1, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
