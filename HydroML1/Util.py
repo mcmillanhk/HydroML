@@ -76,6 +76,18 @@ class DatasetProperties:
         temps[:, 1, :] = datapoint.climate_data[:, idx, :] / self.climate_norm['tmax(C)']
         return temps
 
+    def runoff_ratio(self, datapoint: DataPoint):
+        rr=self.get_sig(datapoint, 'runoff_ratio')
+        if rr.min() <= 0 or rr.max() >= 1:
+            raise Exception(f"Runoff ratio outside reasonable range min={rr.min()} max={rr.max()}")
+        return rr
+
+    def get_sig(self, datapoint: DataPoint, sig: str):
+        #rr = np.zeros([datapoint.signatures.shape[0]])  #  # batches
+        idx = get_indices([sig], datapoint.signatures)[0]
+        return datapoint.signatures[sig].to_numpy() / self.sig_normalizers[sig]
+
+
     def get_rain(self, datapoints: DataPoint):
         idx_rain = get_indices(['prcp(mm/day)'], self.climate_norm.keys())[0]
         return torch.from_numpy(datapoints.climate_data[:, idx_rain, :])  # rain is t x b

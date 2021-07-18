@@ -24,7 +24,8 @@ class HydModelNet(nn.Module):
         #self.hyd_data_labels = hyd_data_labels
 
         self.outflow_layer = self.make_outflow_layer(self.store_outflow_dim, decoder_properties)
-        self.inflow_layer = self.make_inflow_layer(decoder_properties.hidden_dim, self.store_dim()+1) # +1 for rain
+        self.inflow_layer = self.make_inflow_layer(decoder_properties.hidden_dim, self.store_dim())
+        self.et_layer = self.make_et_layer(decoder_properties.hidden_dim)
 
         self.inflowlog = None
         self.outflowlog = None
@@ -64,6 +65,13 @@ class HydModelNet(nn.Module):
         layers = [layer, nn.Softmax()]  # output in 0..1
         return nn.Sequential(*layers)
 
+    @staticmethod
+    def make_et_layer(hidden_dim):
+        layer = nn.Linear(hidden_dim, 1)
+        #layer.bias.data -= 1  # Make the initial values generally small
+        layers = [layer, nn.Softplus()]  # output in 0..inf
+        return nn.Sequential(*layers)
+
     def init_stores(self, batch_size):
         self.stores = torch.zeros((batch_size, self.store_dim())).double()
         self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 1000  # Start with some non-empty stores (deep, snow)
@@ -82,19 +90,17 @@ class HydModelNet(nn.Module):
         #        torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
     def forward(self, tuple1):  # hyd_input is t x b x i
         (datapoints, encoding) = tuple1
-        #flow = hyd_input[:, :, 0]
-        #hyd_input = hyd_input[:, :, 1:]
+
         idx_rain = get_indices(['prcp(mm/day)'], self.dataset_properties.climate_norm.keys())[0]
         rain = torch.from_numpy(datapoints.climate_data[:, idx_rain, :])  # rain is t x b
 
-        #todo(not(sure))
         steps = rain.shape[0]
         batch_size = rain.shape[1]
         flows = torch.zeros([steps, batch_size]).double()
 
         self.init_stores(batch_size)
 
-        self.inflowlog = np.zeros((steps, self.stores.shape[1]+1))
+        self.inflowlog = np.zeros((steps, self.stores.shape[1]))
         self.outflowlog = np.zeros((steps, self.store_outflow_dim))
 
         fixed_data = torch.cat((torch.tensor(np.array(datapoints.signatures)),
@@ -105,14 +111,17 @@ class HydModelNet(nn.Module):
                                   self.decoder_properties.store_weights*self.stores), 1)  # b x i
             #inputs = torch.cat((torch.from_numpy(datapoints.climate_data[i, :, :]), self.decoder_properties.store_weights*self.stores), 1)
             outputs = self.flownet(inputs)
-            a = self.inflow_layer(outputs)
-            #a = nn.Softmax()(a)  # a is b x stores
+            a = self.inflow_layer(outputs) # a is b x stores
             if a.min() < 0 or a.max() > 1:
                 raise Exception("Relative inflow flux outside [0,1]\n" + str(a))
 
             self.inflowlog[i, :] = a[0, :].detach()
 
-            rain_distn = a[:, 1:] * rain[i, :].unsqueeze(1)  # (b x stores) . (b x 1)
+            et = self.et_layer(outputs)
+            #corrected_rain,_ = torch.max(rain[i, :] - et, 0)  # Actually the same as a relu
+            corrected_rain = nn.ReLU()(rain[i, :] - et.squeeze(1))
+            #rain[i, :] = corrected_rain
+            rain_distn = a * corrected_rain.unsqueeze(1)  # (b x stores) . (b x 1)
             #print('a0=' + str(a[0, :]))
             #print('rain[i, :].unsqueeze(1)=' + str(rain[i, 0]))
             #print('rain_distn=' + str(rain_distn[0, :]))

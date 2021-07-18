@@ -462,9 +462,19 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
         #TODO make sure real stores are scaled to sensible range on input
         decoder_input: torch.Tensor = DecoderProperties.HydModelNetProperties.select_input(datapoints, fake_encoding, fake_stores)
         temperatures = dataset_properties.temperatures(datapoints)
+        rr = dataset_properties.runoff_ratio(datapoints)
+        q_mean = dataset_properties.get_sig(datapoints, 'q_mean')
+        expected_et = q_mean * (1-rr)  # t x b?
+
+        av_temp = np.mean(np.mean(temperatures, axis=1), axis=0)  # b
+        #expected_et should be somewhat dependent on temperature (TODO is PET available?)
+        temp_centered = (np.mean(temperatures, axis=1) - np.expand_dims(av_temp, 0))/5
+        temp_centered_02 = np.tanh(temp_centered)+1
+
+        expected_et_scaled = temp_centered_02*np.expand_dims(expected_et, 0)
+        # For debugging: np.mean(expected_et_scaled, axis=0) ~= expected_et
 
         print(f"Batch {i} of {runs}")
-        #todo I'm working through this function making everything depend on the dataset_properties etc.
 
         #scale_stores = i > runs/2
         # 20 random timesteps
@@ -480,9 +490,10 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
             outputs = decoder.flownet(decoder_input[sample,:,:].permute(1,0))  # decoder_input is t x i x b
             a = decoder.inflow_layer(outputs)  # a is b x stores
             #included in inflow_layer a = nn.Softmax()(a)
-            expected_a = torch.zeros((batch_size, store_size+1)).double()
+            expected_a = torch.zeros((batch_size, store_size)).double()
 
             b = decoder.outflow_layer(outputs)  # b x s+
+            et = decoder.et_layer(outputs)  # b x s+
 
             snow_store_idx = decoder_properties.hyd_model_net_props.Indices.SNOW_STORE
             slow_store_idx = decoder_properties.hyd_model_net_props.Indices.SLOW_STORE
@@ -495,13 +506,16 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
             expected_b = torch.zeros((batch_size, store_size*(store_size+2))).double() + 0.001
             expected_b[:, outflow_idx_start:outflow_idx_end] = 0.2  # random?
 
+            #expected_et = torch.zeros((batch_size))
+
             snowmelt = np.zeros((batch_size))
             for batch_idx in range(batch_size):
-                temp = np.mean(temperatures[sample, :, batch_idx]) # (inputs[batch_idx, index_temp_minmax[0]] + inputs[batch_idx, index_temp_minmax[1]])*0.5/weight_temp
+                temp = np.mean(temperatures[sample, :, batch_idx])  # (inputs[batch_idx, index_temp_minmax[0]] + inputs[batch_idx, index_temp_minmax[1]])*0.5/weight_temp
                 temp = temp + 4*(torch.rand(1)[0]-0.5)  # Make boundary fuzzy
                 snowfall = 0.95 if temp < 4 else 0.05
+
                 expected_a[batch_idx, :] = (1-snowfall) * 1.0/store_size
-                expected_a[batch_idx, store_size] = snowfall
+                expected_a[batch_idx, snow_store_idx] = snowfall
 
                 snowmelt[batch_idx] = max(float(temp), 2)/50
                 expected_b[batch_idx, outflow_idx_start + snow_store_idx] = snowmelt[batch_idx]
@@ -515,6 +529,8 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
                                   decoder_properties.hyd_model_net_props.outflow_weights[0, outflow_idx_start + snow_store_idx])
             else:
                 loss += criterion(b, expected_b)
+
+            loss += criterion(et, torch.from_numpy(expected_et_scaled[sample, :]))
 
             loss_list.append(loss.item())
 
@@ -919,7 +935,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=1, batch_size=batch_size)
+        = load_inputs(subsample_data=100, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
