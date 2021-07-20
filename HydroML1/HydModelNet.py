@@ -75,14 +75,15 @@ class HydModelNet(nn.Module):
     def init_stores(self, batch_size):
         self.stores = torch.zeros((batch_size, self.store_dim())).double()
         self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 1000  # Start with some non-empty stores (deep, snow)
-        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE2] = 100
+        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE2] = 25
 
     def correct_init_baseflow(self, flow, store_coeff):
         baseflow = np.percentile(flow, 25, axis=0)  # flow is t x b
         # Want store_coeff*slowstore = baseflow
         self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = torch.from_numpy(baseflow / np.maximum(store_coeff.detach().numpy(), 0.00001))
-        print(f"Init slow store {self.stores[0, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE]} from "
-              f"baseflow {baseflow[0]}/coeff {store_coeff[0]}")
+        if False:
+            print(f"Init slow store {self.stores[0, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE]} from "
+                  f"baseflow {baseflow[0]}/coeff {store_coeff[0]}")
 
     #def init_hidden(self):
         # This is what we'll initialise our hidden state as

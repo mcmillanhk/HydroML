@@ -76,9 +76,13 @@ class DatasetProperties:
         temps[:, 1, :] = datapoint.climate_data[:, idx, :] / self.climate_norm['tmax(C)']
         return temps
 
+    def get_prob_rain(self, datapoint: DataPoint):
+        is_rain = self.get_rain_np(datapoint) > 0.1
+        return np.sum(is_rain, axis=0)/is_rain.shape[0]
+
     def runoff_ratio(self, datapoint: DataPoint):
         rr=self.get_sig(datapoint, 'runoff_ratio')
-        if rr.min() <= 0 or rr.max() >= 1:
+        if rr.min() <= 0 or rr.max() >= 1.5:
             raise Exception(f"Runoff ratio outside reasonable range min={rr.min()} max={rr.max()}")
         return rr
 
@@ -89,8 +93,11 @@ class DatasetProperties:
 
 
     def get_rain(self, datapoints: DataPoint):
+        return torch.from_numpy(self.get_rain_np(datapoints))
+
+    def get_rain_np(self, datapoints: DataPoint):
         idx_rain = get_indices(['prcp(mm/day)'], self.climate_norm.keys())[0]
-        return torch.from_numpy(datapoints.climate_data[:, idx_rain, :])  # rain is t x b
+        return datapoints.climate_data[:, idx_rain, :]  # rain is t x b
 
 
 class EncoderProperties:
@@ -163,7 +170,7 @@ class DecoderProperties:
 
             self.outflow_weights[0, -self.Indices.STORE_DIM:] = store_outflow_weights
 
-        scale_b = True
+        scale_b = False
         hidden_dim = 100
         output_dim = 1
         num_layers = 2

@@ -314,10 +314,11 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                 ax2.plot(loss_list, color='b')
                 ax2.plot(moving_average(loss_list), color='#0000AA')
                 ax2.set_ylabel("train/val loss (blue/green)")
-                ax2.ylim(0, 1)
+
                 # ax2 = ax1.twinx()
                 if(len(validation_loss_list)>0):
                     ax2.plot(moving_average(validation_loss_list), color='#00AA00')
+                ax2.ylim(0, 1)
 
                 fig.show()
 
@@ -464,7 +465,8 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
         temperatures = dataset_properties.temperatures(datapoints)
         rr = dataset_properties.runoff_ratio(datapoints)
         q_mean = dataset_properties.get_sig(datapoints, 'q_mean')
-        expected_et = q_mean * (1-rr)  # t x b?
+        prob_rain = dataset_properties.get_prob_rain(datapoints)
+        expected_et = q_mean * (1-rr) / prob_rain  # t x b?
 
         av_temp = np.mean(np.mean(temperatures, axis=1), axis=0)  # b
         #expected_et should be somewhat dependent on temperature (TODO is PET available?)
@@ -503,7 +505,7 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
             outflow_idx_start = decoder_properties.hyd_model_net_props.store_idx_start()
             outflow_idx_end = outflow_idx_start + store_size
 
-            expected_b = torch.zeros((batch_size, store_size*(store_size+2))).double() + 0.001
+            expected_b = torch.zeros((batch_size, decoder_properties.hyd_model_net_props.b_length())).double() + 0.001
             expected_b[:, outflow_idx_start:outflow_idx_end] = 0.2  # random?
 
             #expected_et = torch.zeros((batch_size))
@@ -539,7 +541,7 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
             loss.backward()
             optimizer.step()
 
-        if i % 50 == 0:
+        if i % 250 == 0:
             fig = plt.figure()
             ax_a = fig.add_subplot(3, 1, 1)
             ax_b = fig.add_subplot(3, 1, 2)
@@ -935,7 +937,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=100, batch_size=batch_size)
+        = load_inputs(subsample_data=1, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
