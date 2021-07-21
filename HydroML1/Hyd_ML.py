@@ -702,7 +702,12 @@ def pretrain_decoder(train_loader, decoder, model_store_path, index_temp_minmax)
     return decoder
 """
 
-#Expect encoder is pretrained, decoder might be
+
+def nse(loss):
+    return max(1-loss, 0)
+
+
+# Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
                           #encoder_indices, decoder_indices,
@@ -734,6 +739,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #outputs = None
     for epoch in range(output_epochs):
         #restricted_input = False
+        local_loss_list = []
         for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
             decoder.train()
 
@@ -743,7 +749,9 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
             flow = datapoints.flow_data  # t x b
             error, loss = compute_loss(criterion, flow, outputs)
-            loss_list.append(loss.item())
+            nse_err = nse(loss.item())
+            local_loss_list.append(nse_err)
+            loss_list.append(nse_err)
 
             # Backprop and perform Adam optimisation
             optimizer.zero_grad()
@@ -773,7 +781,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 ax2 = ax_loss.twinx()
                 ax2.plot(loss_list, color='b')
                 ax2.plot(moving_average(loss_list), color='#0000AA')
-                ax2.set_ylabel("Train/val. loss (blue/green)")
+                ax2.set_ylabel("Train/val. NSE (blue/green)")
                 if len(validate_loss_list) > 0:
                     ax2.plot(validate_loss_list, color='g')
                     ax2.plot(moving_average(validate_loss_list), color='#00AA00')
@@ -792,11 +800,11 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties)
             flow = datapoints.flow_data  # t x b
             _, loss = compute_loss(criterion, flow, outputs)
-            temp_validate_loss_list.append(loss.item())
+            temp_validate_loss_list.append(nse(loss.item()))
             if (i+1) % 50 == 0:
-                print(f'Validation loss {i} = {loss.item()}'
-                      .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
-                              str(np.around(error, decimals=3))))
+                #print(f'Validation loss {i} = {loss.item()}'
+                #      .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
+                #              str(np.around(error, decimals=3))))
                 fig = plt.figure(figsize=(18, 18))
                 ax_input = fig.add_subplot(1, 1, 1)
                 plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
@@ -804,6 +812,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
         while len(validate_loss_list) < len(loss_list):
             validate_loss_list.extend(temp_validate_loss_list)
+        print(f'Median validation NSE epoch {epoch} = {np.median(temp_validate_loss_list)} training NSE {np.median(local_loss_list)}')
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
