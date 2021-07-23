@@ -40,7 +40,8 @@ class HydModelNet(nn.Module):
             this_input_dim = input_dim if i == 0 else hidden_dim
             #this_output_dim = hidden_dim if i < num_layers-1 else output_dim
             layers.append(nn.Linear(this_input_dim, hidden_dim))
-            layers.append(nn.ReLU())
+            #layers.append(nn.ReLU())
+            layers.append(nn.Sigmoid())
             if i < num_layers-1:
                 layers.append(self.dropout)
         return nn.Sequential(*layers)

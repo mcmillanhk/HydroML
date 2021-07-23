@@ -91,11 +91,11 @@ class ConvNet(nn.Module):
         #   , nn.MaxPool1d(kernel_size=5, stride=5))
         self.layer2 = nn.Sequential(
             nn.Conv1d(32, 32, kernel_size=11, stride=2, padding=5),
-            nn.ReLU(),
+            nn.Sigmoid(),
             nn.MaxPool1d(kernel_size=2, stride=2))
         self.layer3 = nn.Sequential(
             nn.Conv1d(32, 16, kernel_size=11, stride=2, padding=5),
-            nn.ReLU(),
+            nn.Sigmoid(),
             nn.MaxPool1d(kernel_size=5, stride=5))
         self.drop_out = nn.Dropout()
         self.fc1 = nn.Linear(math.floor(((dataset_properties.length_days/4)/20)) * 16,
