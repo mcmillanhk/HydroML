@@ -713,7 +713,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           #encoder_indices, decoder_indices,
                           model_store_path):
     #, hyd_data_labels):
-    coupled_learning_rate = 0.0001  #0.000005
+    coupled_learning_rate = 0.0002  #0.000005
     output_epochs = 50
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -762,12 +762,12 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
             #idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
 
-            if (idx + 1) % 50 == total_step % 50:
+            if (idx + 1) % 150 == total_step % 50:
 
                 print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
                       .format(epoch + 1, output_epochs, idx + 1, total_step, loss.item(),
                               str(np.around(error, decimals=3))))
-                fig = plt.figure(figsize=(18, 18))
+                fig = plt.figure(figsize=(12, 12))
                 ax_input = fig.add_subplot(2, 2, 1)
                 ax_loss = fig.add_subplot(2, 2, 2)
                 #fig.canvas.draw()
@@ -801,11 +801,11 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             flow = datapoints.flow_data  # t x b
             _, loss = compute_loss(criterion, flow, outputs)
             temp_validate_loss_list.append(nse(loss.item()))
-            if (i+1) % 50 == 0:
+            if (i+1) % 100 == 0:
                 #print(f'Validation loss {i} = {loss.item()}'
                 #      .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
                 #              str(np.around(error, decimals=3))))
-                fig = plt.figure(figsize=(18, 18))
+                fig = plt.figure(figsize=(9, 9))
                 ax_input = fig.add_subplot(1, 1, 1)
                 plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
                 fig.show()
