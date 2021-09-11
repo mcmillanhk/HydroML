@@ -77,7 +77,7 @@ class HydModelNet(nn.Module):
 
     def init_stores(self, batch_size):
         self.stores = torch.zeros((batch_size, self.store_dim())).double()
-        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 1000  # Start with some non-empty stores (deep, snow)
+        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 25  # Start with some non-empty stores (deep, snow)
         self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE2] = 25
 
     def correct_init_baseflow(self, flow, store_coeff):
@@ -95,8 +95,9 @@ class HydModelNet(nn.Module):
     def forward(self, tuple1):  # hyd_input is t x b x i
         (datapoints, encoding) = tuple1
 
-        idx_rain = get_indices(['prcp(mm/day)'], self.dataset_properties.climate_norm.keys())[0]
-        rain = torch.from_numpy(datapoints.climate_data[:, idx_rain, :])  # rain is t x b
+        #idx_rain = get_indices(['prcp(mm/day)'], self.dataset_properties.climate_norm.keys())[0]
+        #rain = torch.from_numpy(datapoints.climate_data[:, idx_rain, :]/)  # rain is t x b
+        rain = self.dataset_properties.get_rain(datapoints)
 
         steps = rain.shape[0]
         batch_size = rain.shape[1]
@@ -112,10 +113,15 @@ class HydModelNet(nn.Module):
         fixed_data = torch.cat((torch.tensor(np.array(datapoints.signatures)),
                                 torch.tensor(np.array(datapoints.attributes)), encoding), 1)
 
+        #print_inputs('Decoder fixed_data', fixed_data)
+
         for i in range(steps):
             inputs = torch.cat((torch.tensor(np.transpose(datapoints.climate_data[i, :, :])), fixed_data,
-                                  self.decoder_properties.store_weights*self.stores), 1)  # b x i
-            #inputs = torch.cat((torch.from_numpy(datapoints.climate_data[i, :, :]), self.decoder_properties.store_weights*self.stores), 1)
+                                self.decoder_properties.store_weights*self.stores), 1)  # b x i
+
+            #if i == 0:
+            #    print_inputs('Decoder inputs', inputs)
+
             outputs = self.flownet(inputs)
             a = self.inflow_layer(outputs) # a is b x stores
             if a.min() < 0 or a.max() > 1:
@@ -172,10 +178,11 @@ class HydModelNet(nn.Module):
                 flow = datapoints.flow_data[:, 0, :]
                 self.correct_init_baseflow(flow, b_flow[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE])
 
+            self.storelog[i, :] = self.stores[0, :].detach()
+            self.petlog[i, :] = et[0].detach()
+
         if flows.min() < 0:
             raise Exception("Negative flow")
 
-        self.storelog[i, :] = self.stores[0, :].detach()
-        self.petlog[i, :] = et[0].detach()
 
         return flows

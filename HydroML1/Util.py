@@ -20,10 +20,10 @@ class DatasetProperties:
     attrib_normalizers = {'carbonate_rocks_frac': 1.0,  # Numbers, not categories, from geol.
                'geol_porostiy': 1.0,
                'geol_permeability': 0.1,
-               'soil_depth_pelletier': 0.1,  # everything from soil
+               'soil_depth_pelletier': 0.02,  # everything from soil
                'soil_depth_statsgo': 1,
-               'soil_porosity': 1,
-               'soil_conductivity': 1,
+               'soil_porosity': 0.2,
+               'soil_conductivity': 0.2,
                'max_water_content': 1,
                'sand_frac': 0.01,  # These are percentages
                'silt_frac': 0.01,
@@ -45,10 +45,10 @@ class DatasetProperties:
         'baseflow_index': 1,
         'stream_elas': 1,
         'q5': 1,
-        'q95': 1,
+        'q95': 0.2,
         'high_q_freq': 0.05,
-        'high_q_dur': 0.05,
-        'low_q_freq': 0.05,
+        'high_q_dur': 0.02,
+        'low_q_freq': 0.01,
         'low_q_dur': 0.01,
         'zero_q_freq': 0.05,
         'hfd_mean': 0.01,
@@ -56,7 +56,7 @@ class DatasetProperties:
 
     climate_norm = {
         'dayl(s)': 0.00002,
-        'prcp(mm/day)': 1,  # we assume this is 1 in a couple places
+        'prcp(mm/day)': 0.05,
         'srad(W/m2)': 0.005,
         'swe(mm)': 1,
         'tmax(C)': 0.1,
@@ -97,12 +97,13 @@ class DatasetProperties:
 
     def get_rain_np(self, datapoints: DataPoint):
         idx_rain = get_indices(['prcp(mm/day)'], self.climate_norm.keys())[0]
-        return datapoints.climate_data[:, idx_rain, :]  # rain is t x b
+        return datapoints.climate_data[:, idx_rain, :]/self.climate_norm['prcp(mm/day)']  # rain is t x b
 
 
 class EncoderProperties:
     encoder_type = EncType.CNNEncoder
     encoder_names = ["prcp(mm/day)", "tmax(C)"]  # "swe(mm)",'flow(cfs)',
+    flow_normalizer = 0.1
     # encoder_indices = get_indices(encoder_names, hyd_data_labels)
     # indices = list(hyd_data_labels).index()
     def encoder_input_dim(self): return len(self.encoder_names)+1  # +1 for flow
@@ -127,7 +128,7 @@ class EncoderProperties:
 
     def select_encoder_inputs(self, datapoint: DataPoint, dataset_properties: DatasetProperties):
         indices = get_indices(self.encoder_names, dataset_properties.climate_norm.keys())
-        return torch.tensor(np.concatenate((datapoint.flow_data, datapoint.climate_data[:, indices, :]), axis=1))\
+        return torch.tensor(np.concatenate((datapoint.flow_data*self.flow_normalizer, datapoint.climate_data[:, indices, :]), axis=1))\
             .permute(2, 1, 0)  # t x i x b -> b x i x t
         #return torch.tensor(datapoint.hydro_data[:, [datapoint.flow_data_cols.index(name)
         #                                             for name in self.encoder_names], :]).permute(self.encoder_perm())
@@ -238,3 +239,6 @@ def get_indices(encoder_names, hyd_data_labels):
         raise Exception()
     return indices
 
+def print_inputs(name, hyd_data):
+    hyd_data.max().max()
+    print(name + f' inputs max {torch.max(torch.max(hyd_data))}, mean {torch.mean(torch.mean(hyd_data))}')

@@ -181,6 +181,7 @@ class SimpleLSTM(nn.Module):
 def cat(n1, n2):
     return n2 if n1 is None else np.concatenate((n1, n2))
 
+
 def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_properties: EncoderProperties,
                  dataset_properties: DatasetProperties):
     #encoder.test()
@@ -191,6 +192,9 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         for idx, datapoints in enumerate(data_loader):
             hyd_data = encoder_properties.select_encoder_inputs(
                 datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+
+            #if idx == 0:
+            #    print_inputs('Encoder', hyd_data)
 
             if encoder_properties.encoder_type == EncType.LSTMEncoder:
                 encoder.hidden = encoder.init_hidden()
@@ -209,9 +213,6 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     for i in range(encodings.shape[1]):
         ax = fig.add_subplot(cols, rows, i+1)
-        encodingvec = encodings[:, i]
-        encodingveccols = (encodingvec-encodingvec.min())/(encodingvec.max()-encodingvec.min())
-        ax.scatter(lons, lats, c=encodingveccols, cmap='viridis')
 
         for stateshape in sf.shapeRecords():
             if stateshape.record.STUSPS in {'AK', 'PR', 'HI', 'GU', 'MP', 'VI', 'AS'}:
@@ -219,6 +220,11 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
             x = [a[0] for a in stateshape.shape.points[:]]
             y = [a[1] for a in stateshape.shape.points[:]]
             ax.plot(x, y, 'k')
+
+        encodingvec = encodings[:, i]
+        encodingveccols = (encodingvec - encodingvec.min()) / (encodingvec.max() - encodingvec.min())
+        ax.scatter(lons, lats, c=encodingveccols, s=9, cmap='viridis')
+
         ax.set_title(f'Encoding {i}')
 
     plt.show()
@@ -361,8 +367,8 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
         # Save the model and plot
         torch.save(encoder.state_dict(), pretrained_encoder_path)
 
-        while(len(validation_loss_list) < len(loss_list)):
-            validation_loss_list += validation_loss
+        #while(len(validation_loss_list) < len(loss_list)):
+        validation_loss_list += validation_loss
 
         errorfig = plt.figure()
         ax_errorfig = errorfig.add_subplot(2, 1, 1)
@@ -818,8 +824,9 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
                 temp = dataset_properties.temperatures(datapoints)[:, :, 0]  # t x 2 [x b=0]
                 ax_temp = ax_pet.twinx()
+                cols = ['b', 'g']
                 for tidx in [0, 1]:
-                    ax_temp.plot(temp[:, tidx], color='b', label="Temperature (C)")  # Batch 0
+                    ax_temp.plot(temp[:, tidx], color=cols[tidx], label="Temperature (C)")  # Batch 0
 
                 ax_pet.set_title("PET and temperature")
                 fig.show()
@@ -840,8 +847,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
                 fig.show()
 
-        while len(validate_loss_list) < len(loss_list):
-            validate_loss_list.extend(temp_validate_loss_list)
+        #while len(validate_loss_list) < len(loss_list):
+        validate_loss_list.extend(temp_validate_loss_list)
         print(f'Median validation NSE epoch {epoch} = {np.median(temp_validate_loss_list)} training NSE {np.median(local_loss_list)}')
 
         test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
@@ -978,7 +985,7 @@ def train_test_everything():
     batch_size = 20
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=10, batch_size=batch_size)
+        = load_inputs(subsample_data=1, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)

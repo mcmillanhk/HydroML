@@ -93,24 +93,7 @@ class CamelsDataset(Dataset):
         area_data.set_index('gauge_id', inplace=True)
         self.area_data = area_data
 
-        sigs = {
-            #'gauge_id': 1,
-            'q_mean': 1,
-            'runoff_ratio': 1,
-            #'slope_fdc': 1,
-            'baseflow_index':1,
-            'stream_elas' : 1,
-            'q5': 1,
-            'q95': 1,
-            'high_q_freq': 0.05,
-            'high_q_dur': 0.05,
-            'low_q_freq': 0.05,
-            'low_q_dur': 0.01,
-            'zero_q_freq': 0.05,
-            'hfd_mean': 0.01,
-        }
-
-        for name, normalizer in sigs.items():
+        for name, normalizer in dataset_properties.sig_normalizers.items():
             self.signatures_frame[name] = self.signatures_frame[name].transform(lambda x: x * normalizer)
 
         #self.dataset_properties = dataset_properties??
