@@ -127,7 +127,8 @@ class EncoderProperties:
 
     def select_encoder_inputs(self, datapoint: DataPoint, dataset_properties: DatasetProperties):
         indices = get_indices(self.encoder_names, dataset_properties.climate_norm.keys())
-        return torch.tensor(np.concatenate((datapoint.flow_data, datapoint.climate_data[:, indices, :]), axis=1))
+        return torch.tensor(np.concatenate((datapoint.flow_data, datapoint.climate_data[:, indices, :]), axis=1))\
+            .permute(2, 1, 0)  # t x i x b -> b x i x t
         #return torch.tensor(datapoint.hydro_data[:, [datapoint.flow_data_cols.index(name)
         #                                             for name in self.encoder_names], :]).permute(self.encoder_perm())
         #return [self.select_one_encoder_inputs(datapoint) for datapoint in datapoints]
@@ -145,7 +146,7 @@ class DecoderProperties:
     #Properties specific to HydModelNet
     class HydModelNetProperties:
         class Indices:
-            STORE_DIM = 4  # 4 is probably the minimum: snow, deep, shallow, runoff
+            STORE_DIM = 8  # 4 is probably the minimum: snow, deep, shallow, runoff
             SLOW_STORE = 0
             SLOW_STORE2 = 1 # a bit faster
             SURFACE_STORE = 2

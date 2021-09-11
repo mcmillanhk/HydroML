@@ -29,6 +29,8 @@ class HydModelNet(nn.Module):
 
         self.inflowlog = None
         self.outflowlog = None
+        self.storelog = None
+        self.petlog = None
 
         #def parameters(self, recurse=True):
     def store_dim(self):
@@ -104,6 +106,8 @@ class HydModelNet(nn.Module):
 
         self.inflowlog = np.zeros((steps, self.stores.shape[1]))
         self.outflowlog = np.zeros((steps, self.store_outflow_dim))
+        self.storelog = np.zeros((steps, self.stores.shape[1]))
+        self.petlog = np.zeros((steps, 1))
 
         fixed_data = torch.cat((torch.tensor(np.array(datapoints.signatures)),
                                 torch.tensor(np.array(datapoints.attributes)), encoding), 1)
@@ -170,5 +174,8 @@ class HydModelNet(nn.Module):
 
         if flows.min() < 0:
             raise Exception("Negative flow")
+
+        self.storelog[i, :] = self.stores[0, :].detach()
+        self.petlog[i, :] = et[0].detach()
 
         return flows
