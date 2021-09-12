@@ -184,7 +184,7 @@ def cat(n1, n2):
 
 def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_properties: EncoderProperties,
                  dataset_properties: DatasetProperties):
-    #encoder.test()
+    encoder.eval()
     encodings = None
     lats = None
     lons = None
@@ -560,8 +560,8 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
             ax_a.plot(a[0, :].detach().numpy(), color='r', label='a')  # Batch 0
             ax_a.plot(expected_a[0, :].numpy(), color='b', label='a')  # Batch 0
 
-            ax_b.plot(b[0, :].detach().numpy(), color='r', label='a')  # Batch 0
-            ax_b.plot(expected_b[0, :].numpy(), color='b', label='a')  # Batch 0
+            ax_b.plot(b[0, :].detach().numpy(), color='r', label='b')  # Batch 0
+            ax_b.plot(expected_b[0, :].numpy(), color='b', label='b')  # Batch 0
 
             ax_loss.plot(loss_list, color='b')
 
@@ -749,7 +749,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     for epoch in range(output_epochs):
         #restricted_input = False
         local_loss_list = []
-        for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
+        for idx, datapoints in enumerate(train_loader):
+            encoder.train()
             decoder.train()
 
             #restricted_input = False  # epoch == 0
@@ -823,6 +824,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 ax_pet.set_title("PET and temperature")
                 fig.show()
 
+        encoder.eval()
         decoder.eval()
         temp_validate_loss_list=[]
         for i, datapoints in enumerate(validate_loader):

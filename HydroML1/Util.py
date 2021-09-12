@@ -173,8 +173,8 @@ class DecoderProperties:
             self.outflow_weights[0, -self.Indices.STORE_DIM:] = store_outflow_weights
 
         scale_b = False
-        hidden_dim = 100
-        output_dim = 1
+        hidden_dim = 20
+        #output_dim = 1
         num_layers = 2
         flow_between_stores = False  #Allow flow between stores; otherwise they're all connected only to out flow
         decoder_include_stores = False
