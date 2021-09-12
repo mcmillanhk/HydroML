@@ -6,9 +6,11 @@ import numpy as np
 
 class HydModelNet(nn.Module):
 
-    def __init__(self, input_dim, decoder_properties: DecoderProperties.HydModelNetProperties,
+    def __init__(self, encoding_dim, decoder_properties: DecoderProperties.HydModelNetProperties,
                  dataset_properties: DatasetProperties):
         super(HydModelNet, self).__init__()
+
+        input_dim = decoder_properties.input_dim2(dataset_properties, encoding_dim)
 
         self.decoder_properties = decoder_properties
         self.dataset_properties = dataset_properties
@@ -110,14 +112,19 @@ class HydModelNet(nn.Module):
         self.storelog = np.zeros((steps, self.stores.shape[1]))
         self.petlog = np.zeros((steps, 1))
 
-        fixed_data = torch.cat((torch.tensor(np.array(datapoints.signatures)),
+        fixed_data = encoding if not self.decoder_properties.decoder_include_fixed \
+            else torch.cat((torch.tensor(np.array(datapoints.signatures)),
                                 torch.tensor(np.array(datapoints.attributes)), encoding), 1)
 
         #print_inputs('Decoder fixed_data', fixed_data)
 
         for i in range(steps):
-            inputs = torch.cat((torch.tensor(np.transpose(datapoints.climate_data[i, :, :])), fixed_data,
+            climate_input = torch.tensor(np.transpose(datapoints.climate_data[i, :, :]))
+            if self.decoder_properties.decoder_include_stores:
+                inputs = torch.cat((climate_input, fixed_data,
                                 self.decoder_properties.store_weights*self.stores), 1)  # b x i
+            else:
+                inputs = torch.cat((climate_input, fixed_data), 1)  # b x i
 
             #if i == 0:
             #    print_inputs('Decoder inputs', inputs)
