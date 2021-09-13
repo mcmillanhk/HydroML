@@ -115,9 +115,9 @@ class EncoderProperties:
     def encoding_dim(self):
         return 0 if self.encoder_type == EncType.NoEncoder else 4
 
-    def select_one_encoder_inputs(self, datapoint: DataPoint):
-        datapoint.hydro_data: pd.DataFrame
-        return np.array(datapoint.hydro_data(self.encoder_names))
+    #def select_one_encoder_inputs(self, datapoint: DataPoint):
+    #    datapoint.hydro_data: pd.DataFrame
+    #    return np.array(datapoint.hydro_data(self.encoder_names))
 
     def encoder_perm(self):
         if self.encoder_type == EncType.LSTMEncoder:
@@ -135,9 +135,7 @@ class EncoderProperties:
             else torch.cat((torch.tensor(np.array(datapoint.signatures)),
                             torch.tensor(np.array(datapoint.attributes))), 1)
         return (hyd_data, fixed_data)
-        #return torch.tensor(datapoint.hydro_data[:, [datapoint.flow_data_cols.index(name)
-        #                                             for name in self.encoder_names], :]).permute(self.encoder_perm())
-        #return [self.select_one_encoder_inputs(datapoint) for datapoint in datapoints]
+
 
 class DecoderType(Enum):
     LSTM = 0
@@ -192,12 +190,6 @@ class DecoderProperties:
         def store_idx_start(self):
             return self.b_length()-self.Indices.STORE_DIM
 
-        #should this come from the dataset properties or the datapoint?
-        #def input_dim(self, dataset_properties: DatasetProperties):
-        #    return dataset_properties.climate_norm.si
-        #def input_dim1(datapoint: DataPoint, encoding_dim: int, store_size: int):
-        #    return datapoint.climate_data.shape[1] + datapoint.signatures.shape[1] + datapoint.attributes.shape[1] + \
-        #           encoding_dim + store_size
         def input_dim2(self, dataset_properties: DatasetProperties, encoding_dim: int):
             total_dim = len(dataset_properties.climate_norm) + encoding_dim
             if self.decoder_include_stores:
@@ -244,13 +236,10 @@ class DecoderProperties:
 
 def get_indices(encoder_names, hyd_data_labels):
     indices = [i for i, x in enumerate(hyd_data_labels) if x in encoder_names]
-    #indices = []
-    #for i, x in enumerate(hyd_data_labels):
-    #    if x in encoder_names:
-    #        indices = [indices, i]
     if len(indices) != len(encoder_names):
         raise Exception()
     return indices
+
 
 def print_inputs(name, hyd_data):
     hyd_data.max().max()
