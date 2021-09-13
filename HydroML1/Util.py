@@ -109,7 +109,8 @@ class EncoderProperties:
     def encoder_input_dim(self): return len(self.encoder_names)+1  # +1 for flow
 
     encoding_num_layers = 2
-    encoding_hidden_dim = 100
+    encoding_hidden_dim = 20
+    encode_attributes = True
 
     def encoding_dim(self):
         return 0 if self.encoder_type == EncType.NoEncoder else 4
@@ -128,8 +129,12 @@ class EncoderProperties:
 
     def select_encoder_inputs(self, datapoint: DataPoint, dataset_properties: DatasetProperties):
         indices = get_indices(self.encoder_names, dataset_properties.climate_norm.keys())
-        return torch.tensor(np.concatenate((datapoint.flow_data*self.flow_normalizer, datapoint.climate_data[:, indices, :]), axis=1))\
+        hyd_data = torch.tensor(np.concatenate((datapoint.flow_data*self.flow_normalizer, datapoint.climate_data[:, indices, :]), axis=1))\
             .permute(2, 1, 0)  # t x i x b -> b x i x t
+        fixed_data = None if not self.encode_attributes \
+            else torch.cat((torch.tensor(np.array(datapoint.signatures)),
+                            torch.tensor(np.array(datapoint.attributes))), 1)
+        return (hyd_data, fixed_data)
         #return torch.tensor(datapoint.hydro_data[:, [datapoint.flow_data_cols.index(name)
         #                                             for name in self.encoder_names], :]).permute(self.encoder_perm())
         #return [self.select_one_encoder_inputs(datapoint) for datapoint in datapoints]

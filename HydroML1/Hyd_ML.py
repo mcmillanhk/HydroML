@@ -101,26 +101,37 @@ class ConvNet(nn.Module):
             nn.Conv1d(32, 16, kernel_size=11, stride=2, padding=5),
             nn.Sigmoid(),
             nn.MaxPool1d(kernel_size=5, stride=5))
-        self.drop_out = nn.Dropout()
-        self.fc1 = nn.Linear(math.floor(((dataset_properties.length_days/4)/20)) * 16,
-                             encoder_properties.encoding_dim())
-        self.fc2 = nn.Linear(encoder_properties.encoding_dim(), dataset_properties.num_sigs())
+        cnn_output_dim = math.floor(((dataset_properties.length_days/4)/20)) * 16
+        fixed_attribute_dim = len(dataset_properties.sig_normalizers)+len(dataset_properties.attrib_normalizers) \
+            if encoder_properties.encode_attributes else 0
+
+        self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
+                                 nn.Sigmoid(), nn.Dropout())
+        self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
+                                 nn.Sigmoid(), nn.Dropout())
+
+        self.fc_predict_sigs = nn.Linear(encoder_properties.encoding_dim(), dataset_properties.num_sigs())
 
         self.pretrain = True
+        self.encoder_properties = encoder_properties
 
     #Actually just add all parameters. Shouldn't do much harm
     #def encoder_parameters(self):
     #    return list(self.layer1.parameters()) + list(self.layer2.parameters()) + list(self.layer3.parameters()) + list(self.fc1.parameters())
 
     def forward(self, x):
-        out = self.layer1(x)  # x is b x t x i
+        (flow_data, attribs) = x
+        out = self.layer1(flow_data)  # flow_data is b x t x i
         out = self.layer2(out)
         out = self.layer3(out)
         out = out.reshape(out.size(0), -1)
-        out = self.drop_out(out)
+        if self.encoder_properties.encode_attributes:
+            out = torch.cat((out, attribs), axis=1)
+        # out = self.drop_out(out)
         out = self.fc1(out)
+        out = self.fc2(out)
         if self.pretrain:
-            out = self.fc2(out)
+            out = self.fc_predict_sigs(out)
         return out  # b x e
 
 
@@ -634,84 +645,6 @@ def make_fake_inputs(batch_size, scale_stores, dataset_properties, weight_temp, 
     return inputs, inputs_no_flow
 
 
-#Make sure decoder responds in expected way to temp
-"""
-def pretrain_decoder(train_loader, decoder, model_store_path, index_temp_minmax):
-    coupled_learning_rate = 0.005
-    output_epochs = 1
-
-    optimizer = torch.optim.Adam(decoder.parameters(), lr=coupled_learning_rate, weight_decay=weight_decay)
-
-    #total_step = len(train_loader)
-    loss_list = []
-    #acc_list = []
-    #validate_loss_list = []
-    #outputs = None
-    for epoch in range(output_epochs):
-        #restricted_input = False
-        for i, (gauge_id, date_start, hyd_data, signatures) in enumerate(train_loader):
-            #if epoch < output_epochs-1:
-            decoder.train()
-
-            #flow, outputs = run_encoder_decoder(decoder, encoder, hyd_data, encoder_indices, restricted_input, model,
-            #                                    decoder_indices, hyd_data_labels, encoder_type)
-            inputs, inputs_no_flow = make_fake_inputs(batch_size, scale_stores, index_temp_minmax, weight_temp, inflow_inputs,
-                                              input_size)
-
-            # inputs = torch.cat((hyd_input[i, :, :], self.stores), 1)
-            outputs = decoder.flownet(inputs_no_flow)
-            a = decoder.inflow_layer(outputs)  # a is b x stores
-            # included in inflow_layer a = nn.Softmax()(a)
-            expected_a = torch.zeros((batch_size, store_size + 1)).double()
-
-            b = decoder.outflow_layer(outputs)  # b x s+
-            expected_b = torch.zeros((batch_size, store_size * (store_size + 2))).double() + 0.01
-            expected_b[:, (store_size * store_size):(store_size * (store_size + 1))] = 0.2  # random?
-
-            for batch_idx in range(batch_size):
-                temp = (inputs[batch_idx, index_temp_minmax[0]] + inputs[batch_idx, index_temp_minmax[1]]) * 0.5 / weight_temp
-                temp = temp + 4 * (torch.rand(1)[0] - 0.5)  # Make boundary fuzzy
-                snowfall = 0.95 if temp < 4 else 0.05
-                expected_a[batch_idx, :] = (1 - snowfall) * 1.0 / store_size
-                expected_a[batch_idx, store_size] = snowfall
-
-                snowmelt = max(float(temp), 2) / 50
-                snow_store_idx = store_size - 1
-                expected_b[batch_idx, store_size * store_size + snow_store_idx] = snowmelt
-                slow_store_idx = store_size * store_size
-                expected_b[batch_idx, slow_store_idx] = 0.001  # we really want this to be slow. Could start with -1 or
-                # something
-                expected_b[batch_idx, slow_store_idx + 1] = 0.001
-
-            loss = criterion(a, expected_a) + criterion(b, expected_b)
-            loss_list.append(loss.item())
-
-            # Backprop and perform Adam optimisation
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            if epoch % 50 == 0:
-                fig = plt.figure()
-                ax_a = fig.add_subplot(3, 1, 1)
-                ax_b = fig.add_subplot(3, 1, 2)
-                ax_loss = fig.add_subplot(3, 1, 3)
-                fig.canvas.draw()
-
-                ax_a.plot(a[0, :].detach().numpy(), color='r', label='a')  # Batch 0
-                ax_a.plot(expected_a[0, :].numpy(), color='b', label='a')  # Batch 0
-
-                ax_b.plot(b[0, :].detach().numpy(), color='r', label='a')  # Batch 0
-                ax_b.plot(expected_b[0, :].numpy(), color='b', label='a')  # Batch 0
-
-                ax_loss.plot(loss_list, color='b')
-
-                fig.show()
-
-    return decoder
-"""
-
-
 def nse(loss):
     return max(1-loss, 0)
 
@@ -892,18 +825,19 @@ def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, datapoints: Data
 
     encoder_input = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
 
-    hyd_data = encoder_input
+    hyd_data = encoder_input[0]
     steps = hyd_data.shape[2]
     actual_batch_size = hyd_data.shape[0]
 
     # Run the forward pass
     if encoder_properties.encoder_type == EncType.LSTMEncoder:
         encoder.hidden = encoder.init_hidden()
-        temp = encoder(hyd_data)  # input b x t x i
+        temp = encoder(hyd_data)  # input b x t x i. May need to be hyd_data now
         encoding = temp[:, -1, :]  # b x o
     elif encoder_properties.encoder_type == EncType.CNNEncoder:
+        #hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)
         encoder.pretrain = False
-        encoding = encoder(hyd_data)  # input b x t x i
+        encoding = encoder(encoder_input)  # input b x t x i
 
     # print("Encoding " + str(encoding))
     #decoder.init_stores()
