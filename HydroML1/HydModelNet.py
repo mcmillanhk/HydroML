@@ -17,7 +17,7 @@ class HydModelNet(nn.Module):
 
         #input_plus_stores_dim = input_dim + self.store_dim()
         self.flow_between_stores = decoder_properties.flow_between_stores
-        self.dropout = nn.Dropout(0.5)
+        #self.dropout = nn.Dropout(0.5)
         self.flownet = self.make_flow_net(decoder_properties.num_layers, input_dim, decoder_properties.hidden_dim)
 
         self.store_outflow_dim = self.decoder_properties.b_length()
@@ -26,8 +26,8 @@ class HydModelNet(nn.Module):
         #self.hyd_data_labels = hyd_data_labels
 
         self.outflow_layer = self.make_outflow_layer(self.store_outflow_dim, decoder_properties)
-        self.inflow_layer = self.make_inflow_layer(decoder_properties.hidden_dim, self.store_dim())
-        self.et_layer = self.make_et_layer(decoder_properties.hidden_dim)
+        self.inflow_layer = self.make_inflow_layer(decoder_properties.flownet_intermediate_output_dim, self.store_dim())
+        self.et_layer = self.make_et_layer(decoder_properties.flownet_intermediate_output_dim)
 
         self.inflowlog = None
         self.outflowlog = None
@@ -42,17 +42,16 @@ class HydModelNet(nn.Module):
         layers = []
         for i in range(num_layers):
             this_input_dim = input_dim if i == 0 else hidden_dim
-            #this_output_dim = hidden_dim if i < num_layers-1 else output_dim
-            layers.append(nn.Linear(this_input_dim, hidden_dim))
-            #layers.append(nn.ReLU())
+            this_output_dim = hidden_dim if i < num_layers-1 else self.decoder_properties.flownet_intermediate_output_dim
+            layers.append(nn.Linear(this_input_dim, this_output_dim))
             layers.append(nn.Sigmoid())
             if i < num_layers-1:
-                layers.append(self.dropout)
+                layers.append(nn.Dropout(dropout_rate))
         return nn.Sequential(*layers)
 
     @staticmethod
     def make_outflow_layer(output_dim, decoder_properties: DecoderProperties.HydModelNetProperties):
-        layer = nn.Linear(decoder_properties.hidden_dim, output_dim)
+        layer = nn.Linear(decoder_properties.flownet_intermediate_output_dim, output_dim)
 
         if decoder_properties.scale_b: # now we weight the output instead
             #layers = [layer, nn.ReLU()]  # output >=0
@@ -64,15 +63,15 @@ class HydModelNet(nn.Module):
         return nn.Sequential(*layers)
 
     @staticmethod
-    def make_inflow_layer(hidden_dim, output_dim):
-        layer = nn.Linear(hidden_dim, output_dim)
+    def make_inflow_layer(intermediate_output_dim, output_dim):
+        layer = nn.Linear(intermediate_output_dim, output_dim)
         #layer.bias.data -= 1  # Make the initial values generally small
         layers = [layer, nn.Softmax()]  # output in 0..1
         return nn.Sequential(*layers)
 
     @staticmethod
-    def make_et_layer(hidden_dim):
-        layer = nn.Linear(hidden_dim, 1)
+    def make_et_layer(intermediate_output_dim):
+        layer = nn.Linear(intermediate_output_dim, 1)
         #layer.bias.data -= 1  # Make the initial values generally small
         layers = [layer, nn.Softplus()]  # output in 0..inf
         return nn.Sequential(*layers)

@@ -177,7 +177,7 @@ class DecoderProperties:
 
         scale_b = False
         hidden_dim = 20
-        #output_dim = 1
+        flownet_intermediate_output_dim = 10
         num_layers = 2
         flow_between_stores = False  #Allow flow between stores; otherwise they're all connected only to out flow
         decoder_include_stores = False
@@ -244,3 +244,5 @@ def get_indices(encoder_names, hyd_data_labels):
 def print_inputs(name, hyd_data):
     hyd_data.max().max()
     print(name + f' inputs max {torch.max(torch.max(hyd_data))}, mean {torch.mean(torch.mean(hyd_data))}')
+
+dropout_rate = 0.1

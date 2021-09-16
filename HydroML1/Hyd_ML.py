@@ -106,9 +106,9 @@ class ConvNet(nn.Module):
             if encoder_properties.encode_attributes else 0
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
-                                 nn.Sigmoid(), nn.Dropout())
+                                 nn.Sigmoid(), nn.Dropout(dropout_rate))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
-                                 nn.Sigmoid(), nn.Dropout())
+                                 nn.Sigmoid(), nn.Dropout(dropout_rate))
 
         self.fc_predict_sigs = nn.Linear(encoder_properties.encoding_dim(), dataset_properties.num_sigs())
 
