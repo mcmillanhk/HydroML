@@ -45,7 +45,7 @@ class HydModelNet(nn.Module):
             this_output_dim = hidden_dim if i < num_layers-1 else self.decoder_properties.flownet_intermediate_output_dim
             layers.append(nn.Linear(this_input_dim, this_output_dim))
             layers.append(nn.Sigmoid())
-            if i < num_layers-1:
+            if i > 0 and i < num_layers-1:
                 layers.append(nn.Dropout(dropout_rate))
         return nn.Sequential(*layers)
 

@@ -35,7 +35,7 @@ def nse_loss(output, target):
 
 
 
-weight_decay = 0.001
+weight_decay = 0.0001
 
 
 def load_inputs(subsample_data=1, batch_size=20):
@@ -108,7 +108,7 @@ class ConvNet(nn.Module):
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
                                  nn.Sigmoid(), nn.Dropout(dropout_rate))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
-                                 nn.Sigmoid(), nn.Dropout(dropout_rate))
+                                 nn.Sigmoid()) # , nn.Dropout(dropout_rate))
 
         self.fc_predict_sigs = nn.Linear(encoder_properties.encoding_dim(), dataset_properties.num_sigs())
 
@@ -655,7 +655,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           #encoder_indices, decoder_indices,
                           model_store_path):
     #, hyd_data_labels):
-    coupled_learning_rate = 0.0002  #0.000005
+    coupled_learning_rate = 0.0001  #0.000005
     output_epochs = 50
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -665,9 +665,10 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #    params += list(encoder.parameters())
 
     # Low weight decay on output layers
-    params = [{'params': decoder.flownet.parameters()},
+    params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay},
               {'params': decoder.inflow_layer.parameters(), 'weight_decay': weight_decay},
-              {'params': decoder.outflow_layer.parameters(), 'weight_decay': weight_decay}
+              {'params': decoder.outflow_layer.parameters(), 'weight_decay': weight_decay},
+              {'params': decoder.et_layer.parameters(), 'weight_decay': weight_decay}
               ]
     if encoder_properties.encoder_type != EncType.NoEncoder:
         params += [{'params': list(encoder.parameters())}]
