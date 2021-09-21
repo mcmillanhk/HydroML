@@ -113,7 +113,7 @@ class EncoderProperties:
     encode_attributes = True
 
     def encoding_dim(self):
-        return 0 if self.encoder_type == EncType.NoEncoder else 4
+        return 0 if self.encoder_type == EncType.NoEncoder else 12
 
     #def select_one_encoder_inputs(self, datapoint: DataPoint):
     #    datapoint.hydro_data: pd.DataFrame

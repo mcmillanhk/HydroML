@@ -35,7 +35,7 @@ def nse_loss(output, target):
 
 
 
-weight_decay = 0.0001
+weight_decay = 0*0.0001
 
 
 def load_inputs(subsample_data=1, batch_size=20):
@@ -199,10 +199,12 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     encodings = None
     lats = None
     lons = None
+    max_gauge = ['X'] * encoder_properties.encoding_dim()
+    max_vals = np.zeros(encoder_properties.encoding_dim()) - 1000
     for data_loader in data_loaders:
         for idx, datapoints in enumerate(data_loader):
             hyd_data = encoder_properties.select_encoder_inputs(
-                datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+                datapoints, dataset_properties)  # t x i x b
 
             #if idx == 0:
             #    print_inputs('Encoder', hyd_data)
@@ -210,12 +212,22 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
             if encoder_properties.encoder_type == EncType.LSTMEncoder:
                 encoder.hidden = encoder.init_hidden()
 
-            encodings = cat(encodings, encoder(hyd_data).detach().numpy())
+            encoding = encoder(hyd_data).detach().numpy()
+            encodings = cat(encodings, encoding)
+
+            for b in range(encoding.shape[0]):
+                for i in range(encoding.shape[1]):
+                    if encoding[b, i] > max_vals[i]:
+                        max_vals[i] = encoding[b, i]
+                        max_gauge[i] = datapoints.gauge_id[b]
 
             lats = cat(lats, datapoints.latlong['gauge_lat'].to_numpy())
             lons = cat(lons, datapoints.latlong['gauge_lon'].to_numpy())
 
     sf = shp.Reader("states_shapefile/cb_2017_us_state_5m.shp")
+
+    print (f"max_vals={max_vals}")
+    print (f"max_gauge={max_gauge}")
 
     cols = int(np.sqrt(encodings.shape[1]))
     rows = int(np.ceil(encodings.shape[1]/cols))
@@ -245,7 +257,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                        encoder_properties: EncoderProperties, pretrained_encoder_path, batch_size):
 
     num_epochs = 30
-    learning_rate = 0.00001  # 0.001 works well for the subset. So does .0001 (maybe too fast though?)
+    learning_rate = 0.000005  # 0.001 works well for the subset. So does .0001 (maybe too fast though?)
 
     shown = False
 
@@ -665,15 +677,18 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #    params += list(encoder.parameters())
 
     # Low weight decay on output layers
-    params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay},
-              {'params': decoder.inflow_layer.parameters(), 'weight_decay': weight_decay},
-              {'params': decoder.outflow_layer.parameters(), 'weight_decay': weight_decay},
-              {'params': decoder.et_layer.parameters(), 'weight_decay': weight_decay}
+    params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
+              {'params': decoder.inflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
+              {'params': decoder.outflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
+              {'params': decoder.et_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate}
               ]
     if encoder_properties.encoder_type != EncType.NoEncoder:
-        params += [{'params': list(encoder.parameters())}]
+        params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay, 'lr': coupled_learning_rate/5}]
 
     optimizer = torch.optim.Adam(params, lr=coupled_learning_rate, weight_decay=weight_decay)
+
+    #Should be random initialization
+    test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
     total_step = len(train_loader)
     loss_list = []
@@ -946,7 +961,7 @@ def train_test_everything():
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    if False:
+    if True:
         encoder.load_state_dict(torch.load(pretrained_encoder_path))
         test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
         return
@@ -959,7 +974,7 @@ def train_test_everything():
         return
 
 
-    if True:
+    if False:
         decoder = train_decoder_only_fakedata(decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())
 
     train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
