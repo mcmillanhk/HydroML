@@ -252,6 +252,12 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     plt.show()
 
+    M = np.corrcoef(encodings, encodings)
+    print("Correlation matrix:")
+    np.set_printoptions(threshold=1000)
+    print(M)
+    np.set_printoptions(threshold=False)
+
 
 def train_encoder_only(encoder, train_loader, validate_loader, dataset_properties: DatasetProperties,
                        encoder_properties: EncoderProperties, pretrained_encoder_path, batch_size):
@@ -486,7 +492,7 @@ def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNe
 
     #for epoch in range(runs):
     for i, datapoints in enumerate(train_loader):
-        batch_size: int = datapoints.flow_data.shape[2]
+        batch_size: int = datapoints.batch_size()
 
         store_size=decoder_properties.hyd_model_net_props.Indices.STORE_DIM
 
@@ -508,7 +514,7 @@ def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNe
         temp_centered = (np.mean(temperatures, axis=1) - np.expand_dims(av_temp, 0))/5
         temp_centered_02 = np.tanh(temp_centered)+1
 
-        expected_et_scaled = temp_centered_02*np.expand_dims(expected_et, 0)
+        expected_et_scaled = temp_centered_02*np.expand_dims(expected_et, 1)
         # For debugging: np.mean(expected_et_scaled, axis=0) ~= expected_et
 
         print(f"Batch {i} of {runs}")
@@ -768,7 +774,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 ax_pet = fig.add_subplot(rows, cols, 6)
                 ax_pet.plot(decoder.petlog, color='r', label="PET (mm)")
 
-                temp = dataset_properties.temperatures(datapoints)[:, :, 0]  # t x 2 [x b=0]
+                temp = dataset_properties.temperatures(datapoints)[0, :, :]  # t x 2 [x b=0]
                 ax_temp = ax_pet.twinx()
                 cols = ['b', 'g']
                 for tidx in [0, 1]:
@@ -806,18 +812,18 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
 def plot_model_flow_performance(ax_input, flow, datapoints: DataPoint, outputs, dataset_properties: DatasetProperties):
     l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  # Batch 0
-    l_gtflow, = ax_input.plot(flow[:, 0, 0], '-', label='GT flow', linewidth=0.5)  # Batch 0
-    ax_input.set_ylim(0, flow[:, 0, 0].max() * 1.75)
-    rain = -dataset_properties.get_rain(datapoints)[:, 0]
+    l_gtflow, = ax_input.plot(flow[0, :, 0], '-', label='GT flow', linewidth=0.5)  # Batch 0
+    ax_input.set_ylim(0, flow[0, :, 0].max() * 1.75)
+    rain = -dataset_properties.get_rain(datapoints)[0, :]
     ax_rain = ax_input.twinx()
     l_rain, = ax_rain.plot(rain.detach().numpy(), color='b', label="Rain")  # Batch 0
     ax_input.legend([l_model, l_gtflow, l_rain], ["Model", "GTFlow", "-Rain"], loc="upper right")
 
 
 def compute_loss(criterion, flow, outputs):
-    steps = flow.shape[0]  # t x 1 x b
+    steps = flow.shape[1]  # t x 1 x b
     spinup = int(steps / 8)
-    gt_flow_after_start = flow[spinup:, 0, :]
+    gt_flow_after_start = flow[:, spinup:, 0].permute(1,0)
     if len(outputs.shape) == 1:
         outputs = outputs.unsqueeze(1)
 
@@ -826,7 +832,7 @@ def compute_loss(criterion, flow, outputs):
     if torch.isnan(loss):
         raise Exception('loss is nan')
     # Track the accuracy
-    error = np.sqrt(np.mean((gt_flow_after_start - output_flow_after_start.detach().numpy()) ** 2))
+    error = torch.sqrt(torch.mean((gt_flow_after_start - output_flow_after_start.detach()) ** 2))
     return error, loss
 
 
@@ -938,15 +944,17 @@ def train_test_everything():
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
-    #TODO input_dim should come from the loaders
-    model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_store_path = 'c:\\hydro\\pytorch_models\\15-hydyear-realfakedata\\'
+    # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\26\\'
+    model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
-    pretrained_encoder_path = model_store_path + 'encoder.ckpt'
-    pretrained_decoder_path = model_store_path + 'decoder.ckpt'
+    encoder_load_path = model_load_path + 'encoder.ckpt'
+    decoder_load_path = model_load_path + 'decoder.ckpt'
 
+    encoder_save_path = model_store_path + 'encoder.ckpt'
+    decoder_save_path = model_store_path + 'decoder.ckpt'
 
     """encoder_indices = None
     decoder_indices = None
@@ -966,18 +974,18 @@ def train_test_everything():
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
     load_encoder = True
-    load_decoder = False
+    load_decoder = True
     if load_encoder:
-        encoder.load_state_dict(torch.load(pretrained_encoder_path))
+        encoder.load_state_dict(torch.load(encoder_load_path))
         #test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
     if load_decoder:
-        decoder.load_state_dict(torch.load(pretrained_decoder_path))
+        decoder.load_state_dict(torch.load(decoder_load_path))
 
     if False:
         if encoder_properties.encoder_type != EncType.NoEncoder:
             train_encoder_only(encoder, train_loader, validate_loader=validate_loader, dataset_properties=
                                dataset_properties, encoder_properties=encoder_properties,
-                               pretrained_encoder_path=pretrained_encoder_path, batch_size=batch_size)
+                               pretrained_encoder_path=encoder_save_path, batch_size=batch_size)
         return
 
     if not load_decoder:

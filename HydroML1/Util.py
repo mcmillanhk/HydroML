@@ -69,16 +69,16 @@ class DatasetProperties:
     def sig_index(self, name): return list(self.sig_normalizers.keys()).index(name)
 
     def temperatures(self, datapoint: DataPoint):
-        temps = np.zeros([datapoint.climate_data.shape[0], 2, datapoint.climate_data.shape[2]])
+        temps = np.zeros([datapoint.batch_size(), 2, datapoint.timesteps()])
         idx = get_indices(['tmin(C)'], datapoint.climate_data_cols)[0]
-        temps[:, 0, :] = datapoint.climate_data[:, idx, :] / self.climate_norm['tmin(C)']
+        temps[:, 0, :] = datapoint.climate_data[:, :, idx] / self.climate_norm['tmin(C)']
         idx = get_indices(['tmax(C)'], datapoint.climate_data_cols)[0]
-        temps[:, 1, :] = datapoint.climate_data[:, idx, :] / self.climate_norm['tmax(C)']
+        temps[:, 1, :] = datapoint.climate_data[:, :, idx] / self.climate_norm['tmax(C)']
         return temps
 
     def get_prob_rain(self, datapoint: DataPoint):
         is_rain = self.get_rain_np(datapoint) > 0.1
-        return np.sum(is_rain, axis=0)/is_rain.shape[0]
+        return np.sum(is_rain, axis=1)/is_rain.shape[1]
 
     def runoff_ratio(self, datapoint: DataPoint):
         rr=self.get_sig(datapoint, 'runoff_ratio')
@@ -91,13 +91,12 @@ class DatasetProperties:
         idx = get_indices([sig], datapoint.signatures)[0]
         return datapoint.signatures[sig].to_numpy() / self.sig_normalizers[sig]
 
+    def get_rain_np(self, datapoints: DataPoint):
+        return self.get_rain(datapoints).numpy()
 
     def get_rain(self, datapoints: DataPoint):
-        return torch.from_numpy(self.get_rain_np(datapoints))
-
-    def get_rain_np(self, datapoints: DataPoint):
         idx_rain = get_indices(['prcp(mm/day)'], self.climate_norm.keys())[0]
-        return datapoints.climate_data[:, idx_rain, :]/self.climate_norm['prcp(mm/day)']  # rain is t x b
+        return datapoints.climate_data[:, :, idx_rain]/self.climate_norm['prcp(mm/day)']  # rain is t x b
 
 
 class EncoderProperties:
@@ -129,8 +128,8 @@ class EncoderProperties:
 
     def select_encoder_inputs(self, datapoint: DataPoint, dataset_properties: DatasetProperties):
         indices = get_indices(self.encoder_names, dataset_properties.climate_norm.keys())
-        hyd_data = torch.tensor(np.concatenate((datapoint.flow_data*self.flow_normalizer, datapoint.climate_data[:, indices, :]), axis=1))\
-            .permute(2, 1, 0)  # t x i x b -> b x i x t
+        hyd_data = torch.cat((datapoint.flow_data*self.flow_normalizer, datapoint.climate_data[:, :, indices]), dim=2)\
+            .permute(0, 2, 1)  # i x t x b -> b x i x t
         fixed_data = None if not self.encode_attributes \
             else torch.cat((torch.tensor(np.array(datapoint.signatures)),
                             torch.tensor(np.array(datapoint.attributes))), 1)
@@ -199,10 +198,10 @@ class DecoderProperties:
             return total_dim
 
         def select_input(self, datapoints: DataPoint, encoding, stores, dataset_properties: DatasetProperties):
-            batchsize=datapoints.climate_data.shape[2]
-            timesteps=datapoints.climate_data.shape[0]
+            batchsize=datapoints.climate_data.shape[0]
+            timesteps=datapoints.climate_data.shape[1]
             decoder_input_dim = self.input_dim2(dataset_properties, encoding.shape[1])
-            num_climate_attribs = datapoints.climate_data.shape[1]
+            num_climate_attribs = datapoints.climate_data.shape[2]
 
             num_signatures = datapoints.signatures.shape[1] if self.decoder_include_fixed else 0
             num_attributes = datapoints.attributes.shape[1] if self.decoder_include_fixed else 0
@@ -215,21 +214,21 @@ class DecoderProperties:
             encoding_start_idx = attrib_start_idx+num_attributes
             store_start_idx = encoding_start_idx+encoding_dim
 
-            decoder_input = np.full([timesteps, decoder_input_dim, batchsize], np.nan)
-            decoder_input[:, climate_start_idx:sig_start_idx, :] = datapoints.climate_data
+            decoder_input = torch.empty(timesteps, decoder_input_dim, batchsize, dtype=torch.double).fill_(np.nan)
+            decoder_input[:, climate_start_idx:sig_start_idx, :] = datapoints.climate_data.permute(1, 2, 0)
 
             if self.decoder_include_fixed:
                 decoder_input[:, sig_start_idx:attrib_start_idx, :] = np.expand_dims(np.transpose(np.array(datapoints.signatures)), 0)
                 decoder_input[:, attrib_start_idx:encoding_start_idx, :] = np.expand_dims(np.transpose(np.array(datapoints.attributes)), 0)
 
-            decoder_input[:, encoding_start_idx:store_start_idx, :] = encoding
+            decoder_input[:, encoding_start_idx:store_start_idx, :] = torch.from_numpy(encoding) # TODO don't do this broadcast
 
             if self.decoder_include_stores:
                 decoder_input[:, store_start_idx:(store_start_idx+store_size), :] = stores
             if np.isnan(decoder_input).any().any():
                 raise Exception("Failed to fill decoder_input")
 
-            return torch.from_numpy(decoder_input)
+            return decoder_input
 
     hyd_model_net_props = HydModelNetProperties()
 

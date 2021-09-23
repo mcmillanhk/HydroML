@@ -329,7 +329,8 @@ class CamelsDataset(Dataset):
         latlong = self.latlong.loc[self.latlong['gauge_id'] == float(gauge_id)]
 
 
-        return DataPoint(gauge_id+'-'+str(flow_date_start), np.array(flow_data), flow_data.columns.tolist(), np.array(climate_data), climate_data.columns.tolist(), signatures,
+        return DataPoint(gauge_id+'-'+str(flow_date_start), torch.tensor(flow_data.values), flow_data.columns.tolist(),
+                         torch.tensor(climate_data.values), climate_data.columns.tolist(), signatures,
                          attribs, latlong)
 
     def load_flow_climate_csv(self, gauge_id):

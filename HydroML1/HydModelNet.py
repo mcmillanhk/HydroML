@@ -100,8 +100,8 @@ class HydModelNet(nn.Module):
         #rain = torch.from_numpy(datapoints.climate_data[:, idx_rain, :]/)  # rain is t x b
         rain = self.dataset_properties.get_rain(datapoints)
 
-        steps = rain.shape[0]
-        batch_size = rain.shape[1]
+        steps = datapoints.timesteps()
+        batch_size = datapoints.batch_size() # rain.shape[1]
         flows = torch.zeros([steps, batch_size]).double()
 
         self.init_stores(batch_size)
@@ -118,7 +118,7 @@ class HydModelNet(nn.Module):
         #print_inputs('Decoder fixed_data', fixed_data)
 
         for i in range(steps):
-            climate_input = torch.tensor(np.transpose(datapoints.climate_data[i, :, :]))
+            climate_input = datapoints.climate_data[:, i, :]
             if self.decoder_properties.decoder_include_stores:
                 inputs = torch.cat((climate_input, fixed_data,
                                 self.decoder_properties.store_weights*self.stores), 1)  # b x i
@@ -137,7 +137,7 @@ class HydModelNet(nn.Module):
 
             et = self.et_layer(outputs)
             #corrected_rain,_ = torch.max(rain[i, :] - et, 0)  # Actually the same as a relu
-            corrected_rain = nn.ReLU()(rain[i, :] - et.squeeze(1))
+            corrected_rain = nn.ReLU()(rain[:, i] - et.squeeze(1))
             #rain[i, :] = corrected_rain
             rain_distn = a * corrected_rain.unsqueeze(1)  # (b x stores) . (b x 1)
             #print('a0=' + str(a[0, :]))
@@ -181,7 +181,7 @@ class HydModelNet(nn.Module):
 
             if i == 0:
                 #print(f"b_flow={b_flow[0,:]} stores={self.stores[0,:]}")
-                flow = datapoints.flow_data[:, 0, :]
+                flow = datapoints.flow_data[0, :, :]
                 self.correct_init_baseflow(flow, b_flow[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE])
 
             self.storelog[i, :] = self.stores[0, :].detach()
