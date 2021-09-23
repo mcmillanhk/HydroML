@@ -471,7 +471,7 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
 
 
 #input_size, store_size, batch_size, index_temp_minmax, weight_temp):
-def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_properties: DatasetProperties, decoder_properties: DecoderProperties, encoding_dim: int):
+def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNet, train_loader, dataset_properties: DatasetProperties, decoder_properties: DecoderProperties, encoding_dim: int):
     coupled_learning_rate = 0.0003
 
     criterion = nn.MSELoss()  #  nn.MSELoss()
@@ -489,7 +489,10 @@ def train_decoder_only_fakedata(decoder: HydModelNet, train_loader, dataset_prop
         batch_size: int = datapoints.flow_data.shape[2]
 
         store_size=decoder_properties.hyd_model_net_props.Indices.STORE_DIM
-        fake_encoding = np.random.uniform(-1, 1, [1, encoding_dim, batch_size])
+
+        #fake_encoding = np.random.uniform(-1, 1, [1, encoding_dim, batch_size])
+        encoder_input = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)
+        fake_encoding = np.expand_dims(np.transpose(encoder(encoder_input).detach().numpy()), 0)
         fake_stores = np.random.uniform(0, 1, [1, store_size, batch_size])
 
         decoder_input: torch.Tensor = decoder_properties.hyd_model_net_props.select_input(datapoints,
@@ -760,6 +763,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 ax_stores = fig.add_subplot(rows, cols, 5)
                 ax_stores.plot(decoder.storelog)
                 ax_stores.set_title("Stores")
+                ax_stores.set_yscale('log')
 
                 ax_pet = fig.add_subplot(rows, cols, 6)
                 ax_pet.plot(decoder.petlog, color='r', label="PET (mm)")
@@ -941,7 +945,7 @@ def train_test_everything():
         os.mkdir(model_store_path)
 
     pretrained_encoder_path = model_store_path + 'encoder.ckpt'
-    #pretrained_decoder_path = model_store_path + 'decoder-april19.ckpt'
+    pretrained_decoder_path = model_store_path + 'decoder.ckpt'
 
 
     """encoder_indices = None
@@ -961,10 +965,13 @@ def train_test_everything():
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    if True:
+    load_encoder = True
+    load_decoder = False
+    if load_encoder:
         encoder.load_state_dict(torch.load(pretrained_encoder_path))
-        test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
-        return
+        #test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
+    if load_decoder:
+        decoder.load_state_dict(torch.load(pretrained_decoder_path))
 
     if False:
         if encoder_properties.encoder_type != EncType.NoEncoder:
@@ -973,9 +980,8 @@ def train_test_everything():
                                pretrained_encoder_path=pretrained_encoder_path, batch_size=batch_size)
         return
 
-
-    if False:
-        decoder = train_decoder_only_fakedata(decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())
+    if not load_decoder:
+        decoder = train_decoder_only_fakedata(encoder, encoder_properties, decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())
 
     train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
                           dataset_properties, model_store_path=model_store_path)
