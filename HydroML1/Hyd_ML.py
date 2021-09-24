@@ -252,7 +252,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     plt.show()
 
-    M = np.corrcoef(encodings, encodings)
+    M = np.corrcoef(np.transpose(encodings), np.transpose(encodings))
     print("Correlation matrix:")
     np.set_printoptions(threshold=1000)
     print(M)
@@ -676,7 +676,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           #encoder_indices, decoder_indices,
                           model_store_path):
     #, hyd_data_labels):
-    coupled_learning_rate = 0.0001  #0.000005
+    coupled_learning_rate = 0.0001/10  #0.000005
     output_epochs = 50
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -936,16 +936,16 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 
 def train_test_everything():
-    batch_size = 20
+    batch_size = 5
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=1, batch_size=batch_size)
+        = load_inputs(subsample_data=50, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\26\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\27\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
