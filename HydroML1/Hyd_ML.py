@@ -101,7 +101,11 @@ class ConvNet(nn.Module):
             nn.Conv1d(32, 16, kernel_size=11, stride=2, padding=5),
             nn.Sigmoid(),
             nn.MaxPool1d(kernel_size=5, stride=5))
-        cnn_output_dim = math.floor(((dataset_properties.length_days/4)/20)) * 16
+        l3outputdim = math.floor(((dataset_properties.length_days / 4) / 20))
+        self.layer4 = nn.Sequential(
+            nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
+
+        cnn_output_dim =  16
         fixed_attribute_dim = len(dataset_properties.sig_normalizers)+len(dataset_properties.attrib_normalizers) \
             if encoder_properties.encode_attributes else 0
 
@@ -124,6 +128,7 @@ class ConvNet(nn.Module):
         out = self.layer1(flow_data)  # flow_data is b x t x i
         out = self.layer2(out)
         out = self.layer3(out)
+        out = self.layer4(out)
         out = out.reshape(out.size(0), -1)
         if self.encoder_properties.encode_attributes:
             out = torch.cat((out, attribs), axis=1)
@@ -252,7 +257,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     plt.show()
 
-    M = np.corrcoef(np.transpose(encodings), np.transpose(encodings))
+    M = np.corrcoef(np.transpose(encodings))
     print("Correlation matrix:")
     np.set_printoptions(threshold=1000)
     print(M)
@@ -676,7 +681,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           #encoder_indices, decoder_indices,
                           model_store_path):
     #, hyd_data_labels):
-    coupled_learning_rate = 0.0001/10  #0.000005
+    coupled_learning_rate = 0.001
     output_epochs = 50
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -778,7 +783,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 ax_temp = ax_pet.twinx()
                 cols = ['b', 'g']
                 for tidx in [0, 1]:
-                    ax_temp.plot(temp[:, tidx], color=cols[tidx], label="Temperature (C)")  # Batch 0
+                    ax_temp.plot(temp[tidx, :], color=cols[tidx], label="Temperature (C)")  # Batch 0
 
                 ax_pet.set_title("PET and temperature")
                 fig.show()
@@ -936,10 +941,10 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 
 def train_test_everything():
-    batch_size = 5
+    batch_size = 20
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=50, batch_size=batch_size)
+        = load_inputs(subsample_data=1, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
@@ -973,8 +978,8 @@ def train_test_everything():
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = True
-    load_decoder = True
+    load_encoder = False
+    load_decoder = False
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
         #test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
