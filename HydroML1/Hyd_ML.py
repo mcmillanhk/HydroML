@@ -259,9 +259,11 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     M = np.corrcoef(np.transpose(encodings))
     print("Correlation matrix:")
-    np.set_printoptions(threshold=1000, linewidth=250)
+    np.set_printoptions(precision=3, threshold=1000, linewidth=250)
     print(M)
-    np.set_printoptions(threshold=False)
+    u, s, vh = np.linalg.svd(M)
+    print(f"sv: {s}")
+    np.set_printoptions(precision=None, threshold=False)
 
 
 def train_encoder_only(encoder, train_loader, validate_loader, dataset_properties: DatasetProperties,
@@ -681,7 +683,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           #encoder_indices, decoder_indices,
                           model_store_path):
     #, hyd_data_labels):
-    coupled_learning_rate = 0.001/4
+    coupled_learning_rate = 0.001
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -950,7 +952,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\27\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\29\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -961,17 +963,6 @@ def train_test_everything():
     encoder_save_path = model_store_path + 'encoder.ckpt'
     decoder_save_path = model_store_path + 'decoder.ckpt'
 
-    """encoder_indices = None
-    decoder_indices = None
-    if True:
-        encoder_names = ["prcp(mm/day)", 'flow(cfs)', "tmax(C)"]  #"swe(mm)",
-        encoder_indices = get_indices(encoder_names, hyd_data_labels)
-        #indices = list(hyd_data_labels).index()
-        encoder_input_dim = len(encoder_indices)
-
-    if False:
-        decoder_names = encoder_names
-        decoder_indices = get_indices(decoder_names, hyd_data_labels)"""
     encoder_properties = EncoderProperties()
     decoder_properties = DecoderProperties()
 
