@@ -105,14 +105,16 @@ class EncoderProperties:
     flow_normalizer = 0.1
     # encoder_indices = get_indices(encoder_names, hyd_data_labels)
     # indices = list(hyd_data_labels).index()
-    def encoder_input_dim(self): return len(self.encoder_names)+1  # +1 for flow
+
+    def encoder_input_dim(self):
+        return len(self.encoder_names)+1  # +1 for flow
 
     encoding_num_layers = 2
     encoding_hidden_dim = 20
     encode_attributes = False
 
     def encoding_dim(self):
-        return 0 if self.encoder_type == EncType.NoEncoder else 12
+        return 0 if self.encoder_type == EncType.NoEncoder else 8
 
     #def select_one_encoder_inputs(self, datapoint: DataPoint):
     #    datapoint.hydro_data: pd.DataFrame

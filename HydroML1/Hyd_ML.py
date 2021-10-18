@@ -487,6 +487,8 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
 def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNet, train_loader, dataset_properties: DatasetProperties, decoder_properties: DecoderProperties, encoding_dim: int):
     coupled_learning_rate = 0.0003
 
+    encoder.pretrain = False
+
     criterion = nn.MSELoss()  #  nn.MSELoss()
     params = list(decoder.parameters())
     #params = list(decoder.outflow_layer.parameters()) + list(decoder.inflow_layer.parameters()) + list(decoder.flownet.parameters())
@@ -952,7 +954,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\29\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\X\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
