@@ -86,26 +86,25 @@ def moving_average(a, n=13):
 # Output of FC1 is the encoding; output of FC2 is for pretraining to predict signatures
 class ConvNet(nn.Module):
 
-
     def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties,):
         super(ConvNet, self).__init__()
         self.layer1 = nn.Sequential(
             nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
-            nn.ReLU())
-        #   , nn.MaxPool1d(kernel_size=5, stride=5))
+            nn.Sigmoid(),
+            nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer2 = nn.Sequential(
             nn.Conv1d(32, 32, kernel_size=11, stride=2, padding=5),
             nn.Sigmoid(),
-            nn.MaxPool1d(kernel_size=2, stride=2))
+            nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer3 = nn.Sequential(
             nn.Conv1d(32, 16, kernel_size=11, stride=2, padding=5),
             nn.Sigmoid(),
-            nn.MaxPool1d(kernel_size=5, stride=5))
-        l3outputdim = math.floor(((dataset_properties.length_days / 4) / 20))
+            nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
+        l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
         self.layer4 = nn.Sequential(
             nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
 
-        cnn_output_dim =  16
+        cnn_output_dim = 16
         fixed_attribute_dim = len(dataset_properties.sig_normalizers)+len(dataset_properties.attrib_normalizers) \
             if encoder_properties.encode_attributes else 0
 
@@ -685,7 +684,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           #encoder_indices, decoder_indices,
                           model_store_path):
     #, hyd_data_labels):
-    coupled_learning_rate = 0.001
+    coupled_learning_rate = 0.002
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -695,15 +694,18 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #    params += list(encoder.parameters())
 
     # Low weight decay on output layers
-    params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
+    decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
               {'params': decoder.inflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
               {'params': decoder.outflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
               {'params': decoder.et_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate}
               ]
+    encoder_params = []
     if encoder_properties.encoder_type != EncType.NoEncoder:
-        params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay, 'lr': coupled_learning_rate/5}]
+        encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay, 'lr': coupled_learning_rate/500}]
 
-    optimizer = torch.optim.Adam(params, lr=coupled_learning_rate, weight_decay=weight_decay)
+    opt_decoder = torch.optim.Adam(decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
+    opt_full = torch.optim.Adam(encoder_params + decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
+    optimizer = opt_full
 
     #Should be random initialization
     test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
@@ -719,6 +721,9 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         for idx, datapoints in enumerate(train_loader):
             encoder.train()
             decoder.train()
+
+            if idx == -1:  #Only include encoder params after 2 epochs
+                optimizer = opt_full
 
             #restricted_input = False  # epoch == 0
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties)
