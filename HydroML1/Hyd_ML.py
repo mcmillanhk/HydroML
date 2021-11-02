@@ -290,7 +290,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
         #datapoints: list[DataPoint]
         encoder.train()
         for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
-            hyd_data = encoder_properties.select_encoder_inputs(datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+            hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
 
             if encoder_properties.encoder_type == EncType.LSTMEncoder:
                 encoder.hidden = encoder.init_hidden()
@@ -345,7 +345,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                 ax1 = fig.add_subplot(3, 1, 3)
                 fig.canvas.draw()
 
-                ax_input.plot(hyd_data[:, 0, :].numpy())  #Batch 0
+                ax_input.plot(hyd_data[0][:, 0, :].numpy())  #Batch 0
                 colors = plt.cm.jet(np.linspace(0, 1, num2plot))
                 for j in range(num2plot):  # range(num_sigs):
                     if encoder_properties.encoder_type == EncType.LSTMEncoder:
@@ -370,7 +370,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                 # ax2 = ax1.twinx()
                 if(len(validation_loss_list)>0):
                     ax2.plot(moving_average(validation_loss_list), color='#00AA00')
-                ax2.ylim(0, 1)
+                ax2.set_ylim(0, 1)
 
                 fig.show()
 
@@ -381,7 +381,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
             baseline_loss = []
             rel_error = None
             for idx, datapoints in enumerate(validate_loader):  #TODO we need to enumerate and batch the correct datapoints
-                hyd_data = encoder_properties.select_encoder_inputs(datapoints)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+                hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
                 outputs = encoder(hyd_data)
                 signatures_ref = datapoints.signatures_tensor()
                 error = criterion(outputs, signatures_ref).item()
@@ -414,7 +414,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
 
         ax_boxwhisker = errorfig.add_subplot(2, 1, 2)
         ax_boxwhisker.boxplot(rel_error, labels=list(dataset_properties.sig_normalizers.keys()), vert=False)
-        ax_boxwhisker.xlim(0, 5)
+        ax_boxwhisker.set_xlim(0, 5)
         errorfig.show()
 
 
@@ -684,7 +684,9 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           #encoder_indices, decoder_indices,
                           model_store_path):
     #, hyd_data_labels):
-    coupled_learning_rate = 0.002
+    encoder.pretrain = False
+
+    coupled_learning_rate = 0.001/4
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -701,7 +703,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
               ]
     encoder_params = []
     if encoder_properties.encoder_type != EncType.NoEncoder:
-        encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay, 'lr': coupled_learning_rate/500}]
+        encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay, 'lr': coupled_learning_rate/100}]
 
     opt_decoder = torch.optim.Adam(decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
     opt_full = torch.optim.Adam(encoder_params + decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
@@ -745,57 +747,13 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             #idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
             rows = 2
             cols = 3
-            if (idx + 1) % 150 == total_step % 50:
+            if (idx + 1) % 300 == total_step % 50:
 
-                print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
-                      .format(epoch + 1, output_epochs, idx + 1, total_step, loss.item(),
-                              str(np.around(error.item(), decimals=3))))
-                fig = plt.figure(figsize=(16, 12))
-                ax_input = fig.add_subplot(rows, cols, 1)
-                ax_loss = fig.add_subplot(rows, cols, 2)
-                #fig.canvas.draw()
-
-                plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
-
-                ax_loss.plot(acc_list, color='r')
-                ax_loss.plot(moving_average(acc_list), color='#AA0000')
-                ax_loss.set_ylabel("error (red)")
-
-                ax2 = ax_loss.twinx()
-
-                ax2.plot(loss_list, color='b')
-                ax2.plot(moving_average(loss_list), color='#0000AA')
-                ax2.set_ylabel("Train/val. NSE (blue/green)")
-                if len(validate_loss_list) > 0:
-                    ax_ty = ax2.twiny()
-                    ax_ty.plot(validate_loss_list, color='g')
-                    ax_ty.plot(moving_average(validate_loss_list), color='#00AA00')
-                    #ax2.set_ylabel("Val. loss (green)")
-
-                ax_inputrates = fig.add_subplot(rows, cols, 3)
-                ax_inputrates.plot(decoder.inflowlog)
-                ax_inputrates.set_title("a (rain distribution factors)")
-
-                ax_outputrates = fig.add_subplot(rows, cols, 4)
-                ax_outputrates.plot(decoder.outflowlog)
-                ax_outputrates.set_title("b (outflow factors)")
-
-                ax_stores = fig.add_subplot(rows, cols, 5)
-                ax_stores.plot(decoder.storelog)
-                ax_stores.set_title("Stores")
-                ax_stores.set_yscale('log')
-
-                ax_pet = fig.add_subplot(rows, cols, 6)
-                ax_pet.plot(decoder.petlog, color='r', label="PET (mm)")
-
-                temp = dataset_properties.temperatures(datapoints)[0, :, :]  # t x 2 [x b=0]
-                ax_temp = ax_pet.twinx()
-                cols = ['b', 'g']
-                for tidx in [0, 1]:
-                    ax_temp.plot(temp[tidx, :], color=cols[tidx], label="Temperature (C)")  # Batch 0
-
-                ax_pet.set_title("PET and temperature")
-                fig.show()
+                try:
+                    plot_training(acc_list, cols, datapoints, dataset_properties, decoder, epoch, error, flow, idx, loss,
+                                  loss_list, output_epochs, outputs, rows, total_step, validate_loss_list)
+                except Exception as e:
+                    print("Plotting error " + e)
 
         encoder.eval()
         decoder.eval()
@@ -805,7 +763,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             flow = datapoints.flow_data  # t x b
             _, loss = compute_loss(criterion, flow, outputs)
             temp_validate_loss_list.append(nse(loss.item()))
-            if (i+1) % 50 == 0:
+            if (i+1) % 100 == 0:
                 #print(f'Validation loss {i} = {loss.item()}'
                 #      .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
                 #              str(np.around(error, decimals=3))))
@@ -822,6 +780,50 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
+
+
+def plot_training(acc_list, cols, datapoints, dataset_properties, decoder, epoch, error, flow, idx, loss, loss_list,
+                  output_epochs, outputs, rows, total_step, validate_loss_list):
+    print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
+          .format(epoch + 1, output_epochs, idx + 1, total_step, loss.item(),
+                  str(np.around(error.item(), decimals=3))))
+    fig = plt.figure(figsize=(16, 12))
+    ax_input = fig.add_subplot(rows, cols, 1)
+    ax_loss = fig.add_subplot(rows, cols, 2)
+    # fig.canvas.draw()
+    plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
+    ax_loss.plot(acc_list, color='r')
+    ax_loss.plot(moving_average(acc_list), color='#AA0000')
+    ax_loss.set_ylabel("error (red)")
+    ax2 = ax_loss.twinx()
+    ax2.plot(loss_list, color='b')
+    ax2.plot(moving_average(loss_list), color='#0000AA')
+    ax2.set_ylabel("Train/val. NSE (blue/green)")
+    if len(validate_loss_list) > 0:
+        ax_ty = ax2.twiny()
+        ax_ty.plot(validate_loss_list, color='g')
+        ax_ty.plot(moving_average(validate_loss_list), color='#00AA00')
+        # ax2.set_ylabel("Val. loss (green)")
+    ax_inputrates = fig.add_subplot(rows, cols, 3)
+    ax_inputrates.plot(decoder.inflowlog)
+    ax_inputrates.set_title("a (rain distribution factors)")
+    ax_outputrates = fig.add_subplot(rows, cols, 4)
+    ax_outputrates.plot(decoder.outflowlog)
+    ax_outputrates.set_title("b (outflow factors)")
+    ax_stores = fig.add_subplot(rows, cols, 5)
+    ax_stores.plot(decoder.storelog)
+    ax_stores.set_title("Stores")
+    if np.min(np.min(decoder.storelog)) > 0:
+        ax_stores.set_yscale('log')
+    ax_pet = fig.add_subplot(rows, cols, 6)
+    ax_pet.plot(decoder.petlog, color='r', label="PET (mm)")
+    temp = dataset_properties.temperatures(datapoints)[0, :, :]  # t x 2 [x b=0]
+    ax_temp = ax_pet.twinx()
+    cols = ['b', 'g']
+    for tidx in [0, 1]:
+        ax_temp.plot(temp[tidx, :], color=cols[tidx], label="Temperature (C)")  # Batch 0
+    ax_pet.set_title("PET and temperature")
+    fig.show()
 
 
 def plot_model_flow_performance(ax_input, flow, datapoints: DataPoint, outputs, dataset_properties: DatasetProperties):
@@ -959,7 +961,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\X\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\45-elots\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -976,8 +978,8 @@ def train_test_everything():
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = False
-    load_decoder = False
+    load_encoder = True
+    load_decoder = True
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
         #test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
@@ -989,7 +991,7 @@ def train_test_everything():
             train_encoder_only(encoder, train_loader, validate_loader=validate_loader, dataset_properties=
                                dataset_properties, encoder_properties=encoder_properties,
                                pretrained_encoder_path=encoder_save_path, batch_size=batch_size)
-        return
+        #return
 
     if not load_decoder:
         decoder = train_decoder_only_fakedata(encoder, encoder_properties, decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())

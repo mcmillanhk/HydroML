@@ -102,7 +102,7 @@ class DatasetProperties:
 class EncoderProperties:
     encoder_type = EncType.CNNEncoder
     encoder_names = ["prcp(mm/day)", "tmax(C)"]  # "swe(mm)",'flow(cfs)',
-    flow_normalizer = 0.1
+    flow_normalizer = 1  # 0.1 is too low...
     # encoder_indices = get_indices(encoder_names, hyd_data_labels)
     # indices = list(hyd_data_labels).index()
 
@@ -111,10 +111,10 @@ class EncoderProperties:
 
     encoding_num_layers = 2
     encoding_hidden_dim = 20
-    encode_attributes = False
+    encode_attributes = True
 
     def encoding_dim(self):
-        return 0 if self.encoder_type == EncType.NoEncoder else 8
+        return 0 if self.encoder_type == EncType.NoEncoder else 16
 
     #def select_one_encoder_inputs(self, datapoint: DataPoint):
     #    datapoint.hydro_data: pd.DataFrame
@@ -247,4 +247,4 @@ def print_inputs(name, hyd_data):
     print(name + f' inputs max {torch.max(torch.max(hyd_data))}, mean {torch.mean(torch.mean(hyd_data))}')
 
 
-dropout_rate = 0.25
+dropout_rate = 0  # 0.25
