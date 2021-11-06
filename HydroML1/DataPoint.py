@@ -16,6 +16,14 @@ class DataPoint:
         self.signatures: pd.DataFrame = signatures
         self.attributes: pd.DataFrame = attributes
         self.latlong: pd.DataFrame = latlong
+        if type(gauge_id) == str:
+            self.gauge_id_int = DataPoint.to_id(gauge_id)
+        else:
+            self.gauge_id_int = [DataPoint.to_id(gid) for gid in gauge_id]
+
+    @staticmethod
+    def to_id(gauge_id: str):
+        return int(gauge_id.split('-')[0])
 
     def batch_size(self):
         return self.flow_data.shape[0]

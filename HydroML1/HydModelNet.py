@@ -111,13 +111,24 @@ class HydModelNet(nn.Module):
         self.storelog = np.zeros((steps, self.stores.shape[1]))
         self.petlog = np.zeros((steps, 1))
 
-        fixed_data = encoding if not self.decoder_properties.decoder_include_fixed \
-            else torch.cat((torch.tensor(np.array(datapoints.signatures)),
-                                torch.tensor(np.array(datapoints.attributes)), encoding), 1)
+        fixed_data = None
 
         #print_inputs('Decoder fixed_data', fixed_data)
 
         for i in range(steps):
+            if fixed_data is None and type(encoding) != dict:
+                fixed_data = encoding if not self.decoder_properties.decoder_include_fixed \
+                    else torch.cat((torch.tensor(np.array(datapoints.signatures)),
+                                    torch.tensor(np.array(datapoints.attributes)), encoding), 1)
+            if type(encoding) == dict:
+                if self.decoder_properties.decoder_include_fixed:
+                    raise Exception("TODO append this")
+                encoding_dim = len(encoding[datapoints.gauge_id_int[0]][0])
+                fixed_data = torch.zeros([batch_size, encoding_dim])
+                for b in range(batch_size):
+                    encoding_id = np.random.randint(0, len(encoding[datapoints.gauge_id_int[b]]))
+                    fixed_data[b, :] = encoding[datapoints.gauge_id_int[b]][encoding_id, :]
+
             climate_input = datapoints.climate_data[:, i, :]
             if self.decoder_properties.decoder_include_stores:
                 inputs = torch.cat((climate_input, fixed_data,

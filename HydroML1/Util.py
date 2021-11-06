@@ -111,7 +111,7 @@ class EncoderProperties:
 
     encoding_num_layers = 2
     encoding_hidden_dim = 20
-    encode_attributes = True
+    encode_attributes = False
 
     def encoding_dim(self):
         return 0 if self.encoder_type == EncType.NoEncoder else 16

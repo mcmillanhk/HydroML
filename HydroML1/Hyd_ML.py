@@ -197,6 +197,7 @@ def cat(n1, n2):
     return n2 if n1 is None else np.concatenate((n1, n2))
 
 
+# TODO use encoding input dict?
 def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_properties: EncoderProperties,
                  dataset_properties: DatasetProperties):
     encoder.eval()
@@ -263,6 +264,86 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     u, s, vh = np.linalg.svd(M)
     print(f"sv: {s}")
     np.set_printoptions(precision=None, threshold=False)
+
+# Return a dictionary mapping gauge_id to a tuple of tensors of encoder inputs (two large tensors)
+def all_encoder_inputs(data_loader: DataLoader, encoder_properties: EncoderProperties,
+                       dataset_properties: DatasetProperties):
+    encoder_inputs = {}
+    for idx, datapoints in enumerate(data_loader):
+        hyd_data = encoder_properties.select_encoder_inputs(
+            datapoints, dataset_properties)  # t x i x b ??
+
+        for b in range(len(datapoints.gauge_id_int)):
+            gauge_id = datapoints.gauge_id_int[b]
+            if gauge_id in encoder_inputs:
+                for i in range(2):
+                    encoder_inputs[gauge_id] = (torch.cat((encoder_inputs[gauge_id][0], hyd_data[0][b:(b+1), :]), axis=0), None if hyd_data[1] is None else torch.cat((encoder_inputs[gauge_id][1], hyd_data[1][b:(b+1), :]), axis=0))
+            else:
+                encoder_inputs[gauge_id] = (hyd_data[0][b:(b+1), :], None if hyd_data[1] is None else hyd_data[1][b:(b+1), :])
+    return encoder_inputs
+
+
+# Return a dictionary mapping gauge_id to a tensor of encodings
+def all_encodings(datapoint: DataPoint, encoder: nn.Module, encoder_properties: EncoderProperties,
+                  dataset_properties: DatasetProperties, all_enc_inputs):
+    encoder.train()
+    encodings = {}
+    for gauge_id in set(datapoint.gauge_id_int):
+        if encoder_properties.encoder_type == EncType.LSTMEncoder:
+            encoder.hidden = encoder.init_hidden()
+
+        encoding = encoder(all_enc_inputs[gauge_id])
+        if gauge_id in encodings:
+            encodings[gauge_id] = torch.cat((encodings[gauge_id], encoding), axis=0)
+        else:
+            encodings[gauge_id] = encoding
+    return encodings
+
+
+def encoding_diff(t1, t2):
+    return torch.sqrt((t1 - t2).square().sum()/t1.numel()).item()
+
+# Return a dictionary mapping gauge_id to a tensor of encodings
+def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperties,
+                  dataset_properties: DatasetProperties, all_enc_inputs):
+    encoder.eval()
+    encodings = {}
+    sums = {}
+    for gauge_id, input_tuple in all_enc_inputs.items():
+        if encoder_properties.encoder_type == EncType.LSTMEncoder:
+            encoder.hidden = encoder.init_hidden().detach()
+
+        encoding = encoder(input_tuple)
+
+        (input_flow, input_fixed) = input_tuple
+        for col in range(input_flow.shape[1]):
+            input_flow1 = input_flow.clone()
+            input_flow1[:, col, :] += 0.1
+            encoding1 = encoder((input_flow1, input_fixed)).detach()
+            delta = encoding_diff(encoding, encoding1)
+            if col not in sums:
+                sums[col] = 0
+            sums[col] += delta
+
+        if input_fixed is not None:
+            for col in range(input_fixed.shape[1]):
+                input_fixed1 = input_fixed.clone()
+                input_fixed1[:, col] += 0.1
+                encoding1 = encoder((input_flow, input_fixed1)).detach()
+                delta = encoding_diff(encoding, encoding1)
+                key = col + 20
+                if key not in sums:
+                    sums[key] = 0
+                sums[key] += delta
+
+    print(sums)
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.plot(sums.keys(), sums.values())
+    ax.set_title(f'Encoding sensitivity')
+
+    plt.show()
+
 
 
 def train_encoder_only(encoder, train_loader, validate_loader, dataset_properties: DatasetProperties,
@@ -686,7 +767,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #, hyd_data_labels):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.001/4
+    coupled_learning_rate = 0.001*3
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -703,7 +784,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
               ]
     encoder_params = []
     if encoder_properties.encoder_type != EncType.NoEncoder:
-        encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay, 'lr': coupled_learning_rate/100}]
+        encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay,
+                            'lr': coupled_learning_rate/10}]
 
     opt_decoder = torch.optim.Adam(decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
     opt_full = torch.optim.Adam(encoder_params + decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
@@ -712,6 +794,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #Should be random initialization
     test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
+    all_enc_inputs = all_encoder_inputs(train_loader, encoder_properties, dataset_properties)
+
     total_step = len(train_loader)
     loss_list = []
     acc_list = []
@@ -719,17 +803,21 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #outputs = None
     for epoch in range(output_epochs):
         #restricted_input = False
+        if epoch % 10 == 0:
+            encoding_sensitivity(encoder, encoder_properties, dataset_properties, all_enc_inputs)
+
         local_loss_list = []
         for idx, datapoints in enumerate(train_loader):
             encoder.train()
             decoder.train()
 
-            if idx == -1:  #Only include encoder params after 2 epochs
+            if idx == -1:  #Only include encoder params after a few epochs
                 optimizer = opt_full
 
-            #restricted_input = False  # epoch == 0
-            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties)
-                                                #encoder_indices, restricted_input, model, decoder_indices)
+            all_enc = all_encodings(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
+
+            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
+                                          dataset_properties, all_enc)
 
             flow = datapoints.flow_data  # t x b
             error, loss = compute_loss(criterion, flow, outputs)
@@ -759,7 +847,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         decoder.eval()
         temp_validate_loss_list=[]
         for i, datapoints in enumerate(validate_loader):
-            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties)
+            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
+                                          dataset_properties, None)
             flow = datapoints.flow_data  # t x b
             _, loss = compute_loss(criterion, flow, outputs)
             temp_validate_loss_list.append(nse(loss.item()))
@@ -853,43 +942,38 @@ def compute_loss(criterion, flow, outputs):
 
 
 def run_encoder_decoder(decoder, encoder, datapoints: DataPoint, encoder_properties: EncoderProperties,
-                          decoder_properties: DecoderProperties, dataset_properties: DatasetProperties):
-                        #encoder_indices, restricted_input, model, decoder_indices, hyd_data_labels, encoder_type):
+                          decoder_properties: DecoderProperties, dataset_properties: DatasetProperties, all_encodings):
     if decoder_properties.decoder_model_type == DecoderType.LSTM:
         flow, outputs = run_encoder_decoder_lstm(decoder, encoder, datapoints)
     else:
-        outputs = run_encoder_decoder_hydmodel(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties)
+        outputs = run_encoder_decoder_hydmodel(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties, all_encodings)
     return outputs
 
 
 def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, datapoints: DataPoint, encoder_properties: EncoderProperties,
-                          decoder_properties: DecoderProperties, dataset_properties: DatasetProperties):
+                          decoder_properties: DecoderProperties, dataset_properties: DatasetProperties, all_encodings):
 
-    encoder_input = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+    if all_encodings is None:
+        encoder_input = encoder_properties.select_encoder_inputs(datapoints,
+                                                                 dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
 
-    hyd_data = encoder_input[0]
-    steps = hyd_data.shape[2]
-    actual_batch_size = hyd_data.shape[0]
+        hyd_data = encoder_input[0]
+        steps = hyd_data.shape[2]
+        actual_batch_size = hyd_data.shape[0]
 
-    # Run the forward pass
-    if encoder_properties.encoder_type == EncType.LSTMEncoder:
-        encoder.hidden = encoder.init_hidden()
-        temp = encoder(hyd_data)  # input b x t x i. May need to be hyd_data now
-        encoding = temp[:, -1, :]  # b x o
-    elif encoder_properties.encoder_type == EncType.CNNEncoder:
-        #hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)
-        encoder.pretrain = False
-        encoding = encoder(encoder_input)  # input b x t x i
+        if encoder_properties.encoder_type == EncType.LSTMEncoder:
+            encoder.hidden = encoder.init_hidden()
+            temp = encoder(hyd_data)  # input b x t x i. May need to be hyd_data now
+            encoding = temp[:, -1, :]  # b x o
+        elif encoder_properties.encoder_type == EncType.CNNEncoder:
+            #hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)
+            encoder.pretrain = False
+            encoding = encoder(encoder_input)  # input b x t x i
 
-    # print("Encoding " + str(encoding))
-    #decoder.init_stores()
-    #encoding_unsqueezed = torch.from_numpy(np.ones((steps, actual_batch_size, encoding.size(1))))
-    #encoding_unsqueezed = encoding_unsqueezed * encoding.unsqueeze(0)
-    #hyd_data = torch.cat((hyd_data, encoding_unsqueezed), 2)  # t x b x i
-    #if restricted_input:
-    #    hyd_data = only_rain(hyd_data)
+        outputs = decoder((datapoints, encoding))  # b x t [expect
+    else:
+        outputs = decoder((datapoints, all_encodings))  # b x t [expect
 
-    outputs = decoder((datapoints, encoding))  # b x t [expect
     if torch.max(np.isnan(outputs.data)) == 1:
         raise Exception('nan generated')
     return outputs
@@ -978,8 +1062,8 @@ def train_test_everything():
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = True
-    load_decoder = True
+    load_encoder = False
+    load_decoder = False
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
         #test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
