@@ -85,20 +85,24 @@ def moving_average(a, n=13):
 
 # Output of FC1 is the encoding; output of FC2 is for pretraining to predict signatures
 class ConvNet(nn.Module):
+    @staticmethod
+    def get_activation():
+        #nn.Sigmoid()
+        return nn.ReLU()
 
     def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties,):
         super(ConvNet, self).__init__()
         self.layer1 = nn.Sequential(
             nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
-            nn.Sigmoid(),
+            ConvNet.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer2 = nn.Sequential(
             nn.Conv1d(32, 32, kernel_size=11, stride=2, padding=5),
-            nn.Sigmoid(),
+            ConvNet.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer3 = nn.Sequential(
             nn.Conv1d(32, 16, kernel_size=11, stride=2, padding=5),
-            nn.Sigmoid(),
+            ConvNet.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
         self.layer4 = nn.Sequential(
@@ -109,7 +113,7 @@ class ConvNet(nn.Module):
             if encoder_properties.encode_attributes else 0
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
-                                 nn.Sigmoid(), nn.Dropout(dropout_rate))
+                                 ConvNet.get_activation(), nn.Dropout(dropout_rate))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
                                  nn.Sigmoid()) # , nn.Dropout(dropout_rate))
 
@@ -767,7 +771,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #, hyd_data_labels):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.001*3
+    coupled_learning_rate = 0.01
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -1036,6 +1040,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 
 def train_test_everything():
+    ConvNet.get_activation()
     batch_size = 20
 
     train_loader, validate_loader, test_loader, dataset_properties \
