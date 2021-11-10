@@ -1,6 +1,7 @@
 #import torch
 #import torch.nn as nn
 import numpy as np
+import torch
 from matplotlib.collections import LineCollection
 from torch.utils.data import DataLoader
 #import numpy as np
@@ -14,25 +15,26 @@ from HydModelNet import *
 from Util import *
 import random
 import shapefile as shp
-import plotly
+
+# Return 1-nse as we will minimize this
+def nse_loss(output, target, reduce=True):  # both inputs t x b
+    loss = torch.sum((output - target)**2, dim=[0])/torch.sum((target - torch.mean(target, dim=[0]))**2, dim=[0]).clamp(min=1e-6)
+    if loss.shape[0] > 300:
+        print("ERROR loss.shape={loss.shape}, should be batch size, likely mismatch with timesteps.")
+
+    if reduce:
+        return torch.mean(loss)
+    else:
+        return loss
 
 
-#from mpl_toolkits import Basemap, cm
-#from mpl_toolkits.basemap import Basemap, cm
-#import cartopy.crs as ccrs
+def old_nse_loss(output, target, reduce=True):  # both inputs t x b
+    loss = torch.sum((output - target)**2)/torch.sum(target**2)
+    return loss
 
 
-"""class SmoothL1Loss(_Loss):
-    __constants__ = ['reduction']
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
-
-    def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.smooth_l1_loss(input, target, reduction=self.reduction)"""
-def nse_loss(output, target):
-    return torch.sum((output - target)**2)/torch.sum(target**2)
-
+def states():
+    return shp.Reader("states_shapefile/cb_2017_us_state_5m.shp")
 
 
 weight_decay = 0*0.0001
@@ -77,7 +79,7 @@ def load_inputs(subsample_data=1, batch_size=20):
     return train_loader, validate_loader, test_loader, dataset_properties
 
 
-def moving_average(a, n=13):
+def moving_average(a, n=45):
     ret = np.cumsum(a, dtype=float)
     ret[n:] = ret[n:] - ret[:-n]
     return ret[n - 1:] / n
@@ -208,6 +210,9 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     encodings = None
     lats = None
     lons = None
+
+    sigs = None
+
     max_gauge = ['X'] * encoder_properties.encoding_dim()
     max_vals = np.zeros(encoder_properties.encoding_dim()) - 1000
     for data_loader in data_loaders:
@@ -230,10 +235,13 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
                         max_vals[i] = encoding[b, i]
                         max_gauge[i] = datapoints.gauge_id[b]
 
-            lats = cat(lats, datapoints.latlong['gauge_lat'].to_numpy())
-            lons = cat(lons, datapoints.latlong['gauge_lon'].to_numpy())
+            lats, lons = cat_lat_lons(datapoints, lats, lons)
 
-    sf = shp.Reader("states_shapefile/cb_2017_us_state_5m.shp")
+            #For correlation:
+            sig = datapoints.signatures_tensor().detach().numpy()
+            sigs = cat(sigs, sig)
+
+    sf = states()
 
     print (f"max_vals={max_vals}")
     print (f"max_gauge={max_gauge}")
@@ -246,28 +254,98 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     for i in range(encodings.shape[1]):
         ax = fig.add_subplot(cols, rows, i+1)
 
-        for stateshape in sf.shapeRecords():
-            if stateshape.record.STUSPS in {'AK', 'PR', 'HI', 'GU', 'MP', 'VI', 'AS'}:
-                continue
-            x = [a[0] for a in stateshape.shape.points[:]]
-            y = [a[1] for a in stateshape.shape.points[:]]
-            ax.plot(x, y, 'k')
+        plot_states(ax, sf)
 
         encodingvec = encodings[:, i]
-        encodingveccols = (encodingvec - encodingvec.min()) / (encodingvec.max() - encodingvec.min())
-        ax.scatter(lons, lats, c=encodingveccols, s=9, cmap='viridis')
-
-        ax.set_title(f'Encoding {i}')
+        colorplot_latlong(ax, encodingvec, f'Encoding {i}', lats, lons)
 
     plt.show()
 
-    M = np.corrcoef(np.transpose(encodings))
-    print("Correlation matrix:")
+    M = np.corrcoef(encodings, rowvar=False)
     np.set_printoptions(precision=3, threshold=1000, linewidth=250)
-    print(M)
+    if False:
+        print("Correlation matrix:")
+        print(M)
     u, s, vh = np.linalg.svd(M)
     print(f"sv: {s}")
+
+    S = np.corrcoef(encodings, sigs, rowvar=False)
+    if False:
+        print("Correlation matrix with signatures:")
+        print(S)
+    num_encodings = encodings.shape[1]
+    num_sigs = len(dataset_properties.sig_normalizers.keys())
+    for idx, signame in zip(range(num_sigs), dataset_properties.sig_normalizers.keys()):
+        correlations = S[num_encodings + idx, :num_encodings]
+        print_corr(correlations, signame, None)
+
+    for enc_idx in range(num_encodings):
+        correlations = S[enc_idx, num_encodings:]
+        print_corr(correlations, f"Encoding{enc_idx}", dataset_properties.sig_normalizers)
+
+    #print(f"sv: {s}")
     np.set_printoptions(precision=None, threshold=False)
+
+
+def colorplot_latlong(ax, encodingvec, title, lats, lons):
+    encodingveccols = (encodingvec - encodingvec.min()) / max((encodingvec.max() - encodingvec.min()), 1e-8)
+    ax.scatter(lons, lats, c=encodingveccols, s=7, cmap='viridis')
+    ax.set_title(title)
+
+
+def plot_states(ax, sf):
+    for stateshape in sf.shapeRecords():
+        if stateshape.record.STUSPS in {'AK', 'PR', 'HI', 'GU', 'MP', 'VI', 'AS'}:
+            continue
+        x = [a[0] for a in stateshape.shape.points[:]]
+        y = [a[1] for a in stateshape.shape.points[:]]
+        ax.plot(x, y, 'k')
+
+
+def cat_lat_lons(datapoints, lats, lons):
+    lats = cat(lats, datapoints.latlong['gauge_lat'].to_numpy())
+    lons = cat(lons, datapoints.latlong['gauge_lon'].to_numpy())
+    return lats, lons
+
+
+def test_encoder_decoder_nse(data_loaders: List[DataLoader], encoder: nn.Module, encoder_properties: EncoderProperties,
+                 decoder: nn.Module, decoder_properties: DecoderProperties, dataset_properties: DatasetProperties):
+    encoder.eval()
+    decoder.eval()
+
+    lats = None
+    lons = None
+
+    nse_err = None
+
+    for data_loader in data_loaders:
+        for idx, datapoints in enumerate(data_loader):
+            hyd_data = encoder_properties.select_encoder_inputs(
+                datapoints, dataset_properties)  # t x i x b
+            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties, None)
+            flow = datapoints.flow_data.squeeze(2).transpose(0,1)  # t x b
+            loss = nse_loss(outputs, flow, reduce=False) # both inputs should be t x b
+            nse_err = cat(nse_err, numpy_nse(loss.detach().numpy()))
+            lats, lons = cat_lat_lons(datapoints, lats, lons)
+
+    fig = plt.figure(figsize=(4,4))
+    ax = fig.add_subplot(1,1,1)
+    plot_states(ax, states())
+    colorplot_latlong(ax, nse_err, f'NSE, range {nse_err.min()}-{nse_err.max()}', lats, lons)
+    plt.show()
+
+
+def print_corr(correlations, signame, enc_names):
+    print(f"{signame}: {correlations}")
+    kv = {abs(correlations[i]): i for i in range(len(correlations))}
+    s = f"{signame} is most correlated with "
+    for k in reversed(sorted(kv.keys())):
+        if k < 0.05:
+            break
+        s = s + f"{kv[k] if enc_names is None else list(enc_names.keys())[kv[k]]}({k}) "
+    print(s)
+    return s
+
 
 # Return a dictionary mapping gauge_id to a tuple of tensors of encoder inputs (two large tensors)
 def all_encoder_inputs(data_loader: DataLoader, encoder_properties: EncoderProperties,
@@ -763,22 +841,20 @@ def nse(loss):
     return max(1-loss, 0)
 
 
+def numpy_nse(loss):
+    return np.maximum(1-loss, 0)
+
+
 # Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
-                          #encoder_indices, decoder_indices,
                           model_store_path):
-    #, hyd_data_labels):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01
+    coupled_learning_rate = 0.0025
     output_epochs = 250
 
-    criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
-
-    #params = list(decoder.parameters())
-    #if encoder_type != EncType.NoEncoder:
-    #    params += list(encoder.parameters())
+    criterion = old_nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
     # Low weight decay on output layers
     decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
@@ -802,13 +878,16 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
     total_step = len(train_loader)
     loss_list = []
-    acc_list = []
+    #acc_list = []
     validate_loss_list = []
     #outputs = None
     for epoch in range(output_epochs):
         #restricted_input = False
         if epoch % 10 == 0:
             encoding_sensitivity(encoder, encoder_properties, dataset_properties, all_enc_inputs)
+            if True:
+                test_encoder_decoder_nse((train_loader, validate_loader), encoder, encoder_properties, decoder,
+                                         decoder_properties, dataset_properties)
 
         local_loss_list = []
         for idx, datapoints in enumerate(train_loader):
@@ -823,8 +902,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, all_enc)
 
-            flow = datapoints.flow_data  # t x b
-            error, loss = compute_loss(criterion, flow, outputs)
+            flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
+            loss = compute_loss(criterion, flow, outputs)
             nse_err = nse(loss.item())
             local_loss_list.append(nse_err)
             loss_list.append(nse_err)
@@ -834,16 +913,14 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             loss.backward()
             optimizer.step()
 
-            acc_list.append(error.item())
+            #acc_list.append(error.item())
 
             #idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
-            rows = 2
-            cols = 3
             if (idx + 1) % 300 == total_step % 50:
 
                 try:
-                    plot_training(acc_list, cols, datapoints, dataset_properties, decoder, epoch, error, flow, idx, loss,
-                                  loss_list, output_epochs, outputs, rows, total_step, validate_loss_list)
+                    plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx,
+                                  loss_list, output_epochs, outputs, total_step, validate_loss_list)
                 except Exception as e:
                     print("Plotting error " + e)
 
@@ -853,8 +930,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         for i, datapoints in enumerate(validate_loader):
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, None)
-            flow = datapoints.flow_data  # t x b
-            _, loss = compute_loss(criterion, flow, outputs)
+            flow = datapoints.flow_data  # b x t
+            loss = compute_loss(criterion, flow, outputs)
             temp_validate_loss_list.append(nse(loss.item()))
             if (i+1) % 100 == 0:
                 #print(f'Validation loss {i} = {loss.item()}'
@@ -875,25 +952,29 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
 
 
-def plot_training(acc_list, cols, datapoints, dataset_properties, decoder, epoch, error, flow, idx, loss, loss_list,
-                  output_epochs, outputs, rows, total_step, validate_loss_list):
-    print('Epoch {} / {}, Step {} / {}, Loss: {:.4f}, Error norm: {:.200s}'
-          .format(epoch + 1, output_epochs, idx + 1, total_step, loss.item(),
-                  str(np.around(error.item(), decimals=3))))
+def plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx, loss_list,
+                  output_epochs, outputs, total_step, validate_loss_list):
+
+    last_losses = np.array(loss_list)
+    start = len(last_losses) - min(len(last_losses), 50)
+    last_nse = np.mean(last_losses[start:])
+    print(f'Epoch {epoch} / {output_epochs}, Step {idx} / {total_step}, NSE: {last_nse}')
+    rows = 2
+    cols = 3
     fig = plt.figure(figsize=(16, 12))
     ax_input = fig.add_subplot(rows, cols, 1)
     ax_loss = fig.add_subplot(rows, cols, 2)
     # fig.canvas.draw()
     plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
-    ax_loss.plot(acc_list, color='r')
-    ax_loss.plot(moving_average(acc_list), color='#AA0000')
-    ax_loss.set_ylabel("error (red)")
-    ax2 = ax_loss.twinx()
-    ax2.plot(loss_list, color='b')
-    ax2.plot(moving_average(loss_list), color='#0000AA')
-    ax2.set_ylabel("Train/val. NSE (blue/green)")
+    #ax_loss.plot(acc_list, color='r')
+    #ax_loss.plot(moving_average(acc_list), color='#AA0000')
+    #ax_loss.set_ylabel("error (red)")
+    #ax2 = ax_loss.twinx()
+    ax_loss.plot(loss_list, color='b')
+    ax_loss.plot(moving_average(loss_list), color='#0000AA')
+    ax_loss.set_ylabel("Train/val. NSE (blue/green)")
     if len(validate_loss_list) > 0:
-        ax_ty = ax2.twiny()
+        ax_ty = ax_loss.twiny()
         ax_ty.plot(validate_loss_list, color='g')
         ax_ty.plot(moving_average(validate_loss_list), color='#00AA00')
         # ax2.set_ylabel("Val. loss (green)")
@@ -931,8 +1012,10 @@ def plot_model_flow_performance(ax_input, flow, datapoints: DataPoint, outputs, 
 
 def compute_loss(criterion, flow, outputs):
     steps = flow.shape[1]  # t x 1 x b
+    if steps <= 20:
+        print("ERROR steps={steps}, likely mismatch with batch size.")
     spinup = int(steps / 8)
-    gt_flow_after_start = flow[:, spinup:, 0].permute(1,0)
+    gt_flow_after_start = flow[:, spinup:, 0].permute(1,0) # t x b
     if len(outputs.shape) == 1:
         outputs = outputs.unsqueeze(1)
 
@@ -941,8 +1024,8 @@ def compute_loss(criterion, flow, outputs):
     if torch.isnan(loss):
         raise Exception('loss is nan')
     # Track the accuracy
-    error = torch.sqrt(torch.mean((gt_flow_after_start - output_flow_after_start.detach()) ** 2))
-    return error, loss
+    #error = torch.sqrt(torch.mean((gt_flow_after_start - output_flow_after_start.detach()) ** 2))
+    return loss
 
 
 def run_encoder_decoder(decoder, encoder, datapoints: DataPoint, encoder_properties: EncoderProperties,
@@ -1041,7 +1124,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 def train_test_everything():
     ConvNet.get_activation()
-    batch_size = 20
+    batch_size = 128
 
     train_loader, validate_loader, test_loader, dataset_properties \
         = load_inputs(subsample_data=1, batch_size=batch_size)
@@ -1050,7 +1133,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\45-elots\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\52\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1067,8 +1150,9 @@ def train_test_everything():
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = False
-    load_decoder = False
+    load_encoder = True
+    load_decoder = True
+    pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
         #test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
@@ -1082,7 +1166,7 @@ def train_test_everything():
                                pretrained_encoder_path=encoder_save_path, batch_size=batch_size)
         #return
 
-    if not load_decoder:
+    if pretrain:
         decoder = train_decoder_only_fakedata(encoder, encoder_properties, decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())
 
     train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
