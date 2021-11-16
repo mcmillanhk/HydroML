@@ -18,14 +18,20 @@ import shapefile as shp
 
 # Return 1-nse as we will minimize this
 def nse_loss(output, target, reduce=True):  # both inputs t x b
-    loss = torch.sum((output - target)**2, dim=[0])/torch.sum((target - torch.mean(target, dim=[0]))**2, dim=[0]).clamp(min=1e-6)
+    num = torch.sum((output - target)**2, dim=[0])
+    denom = torch.sum((target - torch.mean(target, dim=[0]).unsqueeze(0))**2, dim=[0])
+    #denom = denom.clamp(min=0.25*torch.median(denom))
+    loss = num/(denom.clamp(min=1))
     if loss.shape[0] > 300:
         print("ERROR loss.shape={loss.shape}, should be batch size, likely mismatch with timesteps.")
 
+    hl = torch.nn.HuberLoss(delta=0.25)
+    huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
+
     if reduce:
-        return torch.mean(loss)
+        return torch.mean(loss), huber_loss
     else:
-        return loss
+        return loss, huber_loss
 
 
 def old_nse_loss(output, target, reduce=True):  # both inputs t x b
@@ -324,7 +330,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], encoder: nn.Module,
                 datapoints, dataset_properties)  # t x i x b
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties, None)
             flow = datapoints.flow_data.squeeze(2).transpose(0,1)  # t x b
-            loss = nse_loss(outputs, flow, reduce=False) # both inputs should be t x b
+            loss, _ = nse_loss(outputs, flow, reduce=False) # both inputs should be t x b
             nse_err = cat(nse_err, numpy_nse(loss.detach().numpy()))
             lats, lons = cat_lat_lons(datapoints, lats, lons)
 
@@ -336,7 +342,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], encoder: nn.Module,
 
 
 def print_corr(correlations, signame, enc_names):
-    print(f"{signame}: {correlations}")
+    #print(f"{signame}: {correlations}")
     kv = {abs(correlations[i]): i for i in range(len(correlations))}
     s = f"{signame} is most correlated with "
     for k in reversed(sorted(kv.keys())):
@@ -367,7 +373,7 @@ def all_encoder_inputs(data_loader: DataLoader, encoder_properties: EncoderPrope
 
 # Return a dictionary mapping gauge_id to a tensor of encodings
 def all_encodings(datapoint: DataPoint, encoder: nn.Module, encoder_properties: EncoderProperties,
-                  dataset_properties: DatasetProperties, all_enc_inputs):
+                  all_enc_inputs):
     encoder.train()
     encodings = {}
     for gauge_id in set(datapoint.gauge_id_int):
@@ -380,6 +386,33 @@ def all_encodings(datapoint: DataPoint, encoder: nn.Module, encoder_properties: 
         else:
             encodings[gauge_id] = encoding
     return encodings
+
+
+# Return a tensor with one random encoding per batch item
+def one_encoding_per_run(datapoint: DataPoint, encoder: nn.Module, encoder_properties: EncoderProperties,
+                         dataset_properties: DatasetProperties, all_enc_inputs):
+    encoder.train()
+    first_enc_input = list(all_enc_inputs.values())[0]
+    encoder_input_dim1 = first_enc_input[0].shape[1]
+    encoder_input_dim2 = first_enc_input[0].shape[2]
+    batch_size = len(datapoint.gauge_id_int)
+    hyd_data_dim = None if first_enc_input[1] is None else first_enc_input[1].shape[0]
+    encoder_inputs = torch.zeros((batch_size, encoder_input_dim1, encoder_input_dim2), dtype=torch.double)
+    hyd_data = None if hyd_data_dim is None else torch.zeros((batch_size, hyd_data_dim), dtype=torch.double)
+    idx = 0
+    for gauge_id in datapoint.gauge_id_int:
+        encoding_id = np.random.randint(0, all_enc_inputs[gauge_id][0].shape[0])
+        encoder_inputs[idx, :, :] = all_enc_inputs[gauge_id][0][encoding_id, :]
+        if hyd_data_dim is not None:
+            hyd_data_id = np.random.randint(0, all_enc_inputs[gauge_id][1].shape[0])
+            hyd_data[idx, :] = all_enc_inputs[gauge_id][1][hyd_data_id, :]
+        idx = idx + 1
+
+    if encoder_properties.encoder_type == EncType.LSTMEncoder:
+        encoder.hidden = encoder.init_hidden()
+
+    encoding = encoder((encoder_inputs, hyd_data))
+    return encoding
 
 
 def encoding_diff(t1, t2):
@@ -851,10 +884,10 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.0025
+    coupled_learning_rate = 0.01
     output_epochs = 250
 
-    criterion = old_nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
+    criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
     # Low weight decay on output layers
     decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
@@ -874,6 +907,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     #Should be random initialization
     test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
+    randomize_encoding = False
     all_enc_inputs = all_encoder_inputs(train_loader, encoder_properties, dataset_properties)
 
     total_step = len(train_loader)
@@ -897,20 +931,23 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             if idx == -1:  #Only include encoder params after a few epochs
                 optimizer = opt_full
 
-            all_enc = all_encodings(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
+            if randomize_encoding:
+                all_enc = all_encodings(datapoints, encoder, encoder_properties, all_enc_inputs)
+            else:
+                all_enc = one_encoding_per_run(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
 
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, all_enc)
 
             flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
-            loss = compute_loss(criterion, flow, outputs)
+            loss, huber_loss = compute_loss(criterion, flow, outputs)
             nse_err = nse(loss.item())
             local_loss_list.append(nse_err)
             loss_list.append(nse_err)
 
             # Backprop and perform Adam optimisation
             optimizer.zero_grad()
-            loss.backward()
+            huber_loss.backward()
             optimizer.step()
 
             #acc_list.append(error.item())
@@ -931,7 +968,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, None)
             flow = datapoints.flow_data  # b x t
-            loss = compute_loss(criterion, flow, outputs)
+            loss, _ = compute_loss(criterion, flow, outputs)
             temp_validate_loss_list.append(nse(loss.item()))
             if (i+1) % 100 == 0:
                 #print(f'Validation loss {i} = {loss.item()}'
@@ -1020,12 +1057,12 @@ def compute_loss(criterion, flow, outputs):
         outputs = outputs.unsqueeze(1)
 
     output_flow_after_start = outputs[spinup:, :]
-    loss = criterion(output_flow_after_start, torch.tensor(gt_flow_after_start))
+    loss, huber_loss = criterion(output_flow_after_start, torch.tensor(gt_flow_after_start))
     if torch.isnan(loss):
         raise Exception('loss is nan')
     # Track the accuracy
     #error = torch.sqrt(torch.mean((gt_flow_after_start - output_flow_after_start.detach()) ** 2))
-    return loss
+    return loss, huber_loss
 
 
 def run_encoder_decoder(decoder, encoder, datapoints: DataPoint, encoder_properties: EncoderProperties,
@@ -1133,7 +1170,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\52\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\53\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1150,8 +1187,8 @@ def train_test_everything():
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = True
-    load_decoder = True
+    load_encoder = False
+    load_decoder = False
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))

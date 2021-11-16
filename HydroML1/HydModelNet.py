@@ -77,9 +77,9 @@ class HydModelNet(nn.Module):
         return nn.Sequential(*layers)
 
     def init_stores(self, batch_size):
-        self.stores = torch.zeros((batch_size, self.store_dim())).double()
-        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 25  # Start with some non-empty stores (deep, snow)
-        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE2] = 25
+        self.stores = torch.zeros((batch_size, self.store_dim())).double()   # 0mm initialization
+        #self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 25  # Start with some non-empty stores (deep, snow)
+        #self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE2] = 25
 
     def correct_init_baseflow(self, flow, store_coeff):
         baseflow = np.percentile(flow, 25, axis=0)  # flow is t x b
