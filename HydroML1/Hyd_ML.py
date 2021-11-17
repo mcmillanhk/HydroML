@@ -882,7 +882,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01/10
+    coupled_learning_rate = 0.005
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -1168,7 +1168,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 def train_test_everything():
     ConvNet.get_activation()
-    batch_size = 32
+    batch_size = 128
 
     train_loader, validate_loader, test_loader, dataset_properties \
         = load_inputs(subsample_data=1, batch_size=batch_size)
@@ -1195,7 +1195,7 @@ def train_test_everything():
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
     load_encoder = True
-    load_decoder = True
+    load_decoder = False
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
