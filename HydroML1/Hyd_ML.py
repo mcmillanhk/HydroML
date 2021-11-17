@@ -17,7 +17,7 @@ import random
 import shapefile as shp
 
 # Return 1-nse as we will minimize this
-def nse_loss(output, target, reduce=True):  # both inputs t x b
+def nse_loss(output, target):  # both inputs t x b
     num = torch.sum((output - target)**2, dim=[0])
     denom = torch.sum((target - torch.mean(target, dim=[0]).unsqueeze(0))**2, dim=[0])
     #denom = denom.clamp(min=0.25*torch.median(denom))
@@ -28,10 +28,7 @@ def nse_loss(output, target, reduce=True):  # both inputs t x b
     hl = torch.nn.HuberLoss(delta=0.25)
     huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
 
-    if reduce:
-        return torch.mean(loss), huber_loss
-    else:
-        return loss, huber_loss
+    return loss, huber_loss
 
 
 def old_nse_loss(output, target, reduce=True):  # both inputs t x b
@@ -85,7 +82,7 @@ def load_inputs(subsample_data=1, batch_size=20):
     return train_loader, validate_loader, test_loader, dataset_properties
 
 
-def moving_average(a, n=45):
+def moving_average(a, n=451):
     ret = np.cumsum(a, dtype=float)
     ret[n:] = ret[n:] - ret[:-n]
     return ret[n - 1:] / n
@@ -330,14 +327,14 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], encoder: nn.Module,
                 datapoints, dataset_properties)  # t x i x b
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties, None)
             flow = datapoints.flow_data.squeeze(2).transpose(0,1)  # t x b
-            loss, _ = nse_loss(outputs, flow, reduce=False) # both inputs should be t x b
+            loss, _ = nse_loss(outputs, flow) # both inputs should be t x b
             nse_err = cat(nse_err, numpy_nse(loss.detach().numpy()))
             lats, lons = cat_lat_lons(datapoints, lats, lons)
 
     fig = plt.figure(figsize=(4,4))
     ax = fig.add_subplot(1,1,1)
     plot_states(ax, states())
-    colorplot_latlong(ax, nse_err, f'NSE, range {nse_err.min()}-{nse_err.max()}', lats, lons)
+    colorplot_latlong(ax, nse_err, f'NSE, range {nse_err.min():.3f}-{nse_err.max():.3f}', lats, lons)
     plt.show()
 
 
@@ -532,8 +529,8 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
             acc_list.append(rel_error.item())
 
             if idx == len(train_loader)-1:
-                print(f'Epoch {epoch} / {num_epochs}, Step {idx} / {total_step}, Loss: {loss.item()}, Error norm: '
-                      f'{str(np.around(rel_error, decimals=3))}')
+                print(f'Epoch {epoch} / {num_epochs}, Step {idx} / {total_step}, Loss: {loss.item():.3f}, Error norm: '
+                      f'{rel_error:.3f}')
                 num2plot = signatures_ref.shape[1]
                 fig = plt.figure()
                 ax_input = fig.add_subplot(3, 1, 1)
@@ -554,7 +551,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                         plotme[1] = signatures_ref.data[0, j].numpy()
                         ax_sigs.plot(plotme, color=colors[j, :])  # Batch 0 torch.tensor([0, 730]).unsqueeze(1).numpy(),
 
-                ax1.plot(acc_list, color='r')
+                ax1.plot(acc_list, color='r', alpha=0.2)
                 ax1.plot(moving_average(acc_list), color='#AA0000')
                 ax1.set_ylabel("error (red)")
 
@@ -872,6 +869,7 @@ def make_fake_inputs(batch_size, scale_stores, dataset_properties, weight_temp, 
 
 def nse(loss):
     return max(1-loss, 0)
+    #return (1-loss).clamp(min=0)
 
 
 def numpy_nse(loss):
@@ -884,7 +882,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01
+    coupled_learning_rate = 0.01/10
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -941,9 +939,9 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
             flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
             loss, huber_loss = compute_loss(criterion, flow, outputs)
-            nse_err = nse(loss.item())
-            local_loss_list.append(nse_err)
-            loss_list.append(nse_err)
+            nse_err = numpy_nse(loss.detach().numpy()).tolist()
+            local_loss_list.extend(nse_err)
+            loss_list.extend(nse_err)
 
             # Backprop and perform Adam optimisation
             optimizer.zero_grad()
@@ -957,9 +955,9 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
                 try:
                     plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx,
-                                  loss_list, output_epochs, outputs, total_step, validate_loss_list)
+                                  loss_list, output_epochs, outputs, total_step, validate_loss_list, nse_err)
                 except Exception as e:
-                    print("Plotting error " + e)
+                    print("Plotting error " + str(e))
 
         encoder.eval()
         decoder.eval()
@@ -969,19 +967,26 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                                           dataset_properties, None)
             flow = datapoints.flow_data  # b x t
             loss, _ = compute_loss(criterion, flow, outputs)
-            temp_validate_loss_list.append(nse(loss.item()))
+            nse_err = numpy_nse(loss.detach().numpy())
+            temp_validate_loss_list.extend(nse_err)
             if (i+1) % 100 == 0:
                 #print(f'Validation loss {i} = {loss.item()}'
                 #      .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
                 #              str(np.around(error, decimals=3))))
                 fig = plt.figure(figsize=(5, 5))
                 ax_input = fig.add_subplot(1, 1, 1)
-                plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
+                plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties, nse_err)
                 fig.show()
 
         #while len(validate_loss_list) < len(loss_list):
         validate_loss_list.extend(temp_validate_loss_list)
-        print(f'Median validation NSE epoch {epoch} = {np.median(temp_validate_loss_list)} training NSE {np.median(local_loss_list)}')
+        print(f'Median validation NSE epoch {epoch} = {np.median(temp_validate_loss_list):.3f} training NSE {np.median(local_loss_list):.3f}')
+
+        fig = plt.figure(figsize=(2,2))
+        ax_hist = fig.add_subplot(1, 1, 1)
+        ax_hist.hist(temp_validate_loss_list)
+        ax_hist.set_title("Validation NSE")
+        fig.show()
 
         test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
@@ -990,7 +995,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
 
 def plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx, loss_list,
-                  output_epochs, outputs, total_step, validate_loss_list):
+                  output_epochs, outputs, total_step, validate_loss_list, nse_err: List[float]):
 
     last_losses = np.array(loss_list)
     start = len(last_losses) - min(len(last_losses), 50)
@@ -1002,18 +1007,18 @@ def plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx, los
     ax_input = fig.add_subplot(rows, cols, 1)
     ax_loss = fig.add_subplot(rows, cols, 2)
     # fig.canvas.draw()
-    plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties)
+    plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties, nse_err)
     #ax_loss.plot(acc_list, color='r')
     #ax_loss.plot(moving_average(acc_list), color='#AA0000')
     #ax_loss.set_ylabel("error (red)")
     #ax2 = ax_loss.twinx()
-    ax_loss.plot(loss_list, color='b')
-    ax_loss.plot(moving_average(loss_list), color='#0000AA')
+    ax_loss.plot(loss_list, color='b', alpha=0.1)
+    ax_loss.plot(moving_average(loss_list), color='#0000AA', alpha=0.6)
     ax_loss.set_ylabel("Train/val. NSE (blue/green)")
     if len(validate_loss_list) > 0:
         ax_ty = ax_loss.twiny()
-        ax_ty.plot(validate_loss_list, color='g')
-        ax_ty.plot(moving_average(validate_loss_list), color='#00AA00')
+        ax_ty.plot(validate_loss_list, color='g', alpha=0.1)
+        ax_ty.plot(moving_average(validate_loss_list), color='#00AA00', alpha=0.6)
         # ax2.set_ylabel("Val. loss (green)")
     ax_inputrates = fig.add_subplot(rows, cols, 3)
     ax_inputrates.plot(decoder.inflowlog)
@@ -1037,10 +1042,12 @@ def plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx, los
     fig.show()
 
 
-def plot_model_flow_performance(ax_input, flow, datapoints: DataPoint, outputs, dataset_properties: DatasetProperties):
+def plot_model_flow_performance(ax_input, flow, datapoints: DataPoint, outputs, dataset_properties: DatasetProperties,
+                                nse_err: List[float]):
     l_model, = ax_input.plot(outputs[:, 0].detach().numpy(), color='r', label='Model')  # Batch 0
     l_gtflow, = ax_input.plot(flow[0, :, 0], '-', label='GT flow', linewidth=0.5)  # Batch 0
     ax_input.set_ylim(0, flow[0, :, 0].max() * 1.75)
+    ax_input.set_title(f"NSE {nse_err[0]:.3f} Gauge {datapoints.gauge_id[0]}")
     rain = -dataset_properties.get_rain(datapoints)[0, :]
     ax_rain = ax_input.twinx()
     l_rain, = ax_rain.plot(rain.detach().numpy(), color='b', label="Rain")  # Batch 0
@@ -1058,8 +1065,8 @@ def compute_loss(criterion, flow, outputs):
 
     output_flow_after_start = outputs[spinup:, :]
     loss, huber_loss = criterion(output_flow_after_start, torch.tensor(gt_flow_after_start))
-    if torch.isnan(loss):
-        raise Exception('loss is nan')
+    if torch.isnan(huber_loss):
+        raise Exception('huber_loss is nan')
     # Track the accuracy
     #error = torch.sqrt(torch.mean((gt_flow_after_start - output_flow_after_start.detach()) ** 2))
     return loss, huber_loss
@@ -1161,7 +1168,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 def train_test_everything():
     ConvNet.get_activation()
-    batch_size = 128
+    batch_size = 32
 
     train_loader, validate_loader, test_loader, dataset_properties \
         = load_inputs(subsample_data=1, batch_size=batch_size)
@@ -1170,7 +1177,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\53\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\57\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1187,8 +1194,8 @@ def train_test_everything():
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = False
-    load_decoder = False
+    load_encoder = True
+    load_decoder = True
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
