@@ -28,7 +28,7 @@ def nse_loss(output, target):  # both inputs t x b
     hl = torch.nn.HuberLoss(delta=0.25)
     huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
 
-    return loss, huber_loss
+    return numpy_nse(loss.detach().numpy()), huber_loss
 
 
 def old_nse_loss(output, target, reduce=True):  # both inputs t x b
@@ -61,6 +61,11 @@ def load_inputs(subsample_data=1, batch_size=20):
 
     train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, dataset_properties,
                                      subsample_data=subsample_data)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+
+    if subsample_data == 0:
+        return train_loader, train_loader, None, dataset_properties
+
     test_dataset = None
     if load_test:
         test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
@@ -69,7 +74,6 @@ def load_inputs(subsample_data=1, batch_size=20):
                                         dataset_properties, subsample_data=subsample_data)
 
     # Data loader
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size,
                                  shuffle=True, collate_fn=collate_fn)  # Shuffle so we get less spiky validation plots
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False,
@@ -328,7 +332,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], encoder: nn.Module,
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties, None)
             flow = datapoints.flow_data.squeeze(2).transpose(0,1)  # t x b
             loss, _ = nse_loss(outputs, flow) # both inputs should be t x b
-            nse_err = cat(nse_err, numpy_nse(loss.detach().numpy()))
+            nse_err = cat(nse_err, loss)
             lats, lons = cat_lat_lons(datapoints, lats, lons)
 
     fig = plt.figure(figsize=(4,4))
@@ -879,7 +883,7 @@ def numpy_nse(loss):
 # Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
-                          model_store_path):
+                          model_store_path, ablation_test):
     encoder.pretrain = False
 
     coupled_learning_rate = 0.005
@@ -904,19 +908,27 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     optimizer = opt_full
 
     #Should be random initialization
-    test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
+    if not ablation_test:
+        test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
     randomize_encoding = False
     all_enc_inputs = all_encoder_inputs(train_loader, encoder_properties, dataset_properties)
 
     total_step = len(train_loader)
+
+    if ablation_test:
+        plot_idx = [total_step-1]
+        validate_plot_idx=[]
+    else:
+        plot_idx = plot_indices(3, total_step)
+        validate_plot_idx = plot_indices(2, len(validate_loader))
+
     loss_list = []
     #acc_list = []
     validate_loss_list = []
-    #outputs = None
     for epoch in range(output_epochs):
         #restricted_input = False
-        if epoch % 10 == 0:
+        if epoch % 10 == 0 and not ablation_test:
             encoding_sensitivity(encoder, encoder_properties, dataset_properties, all_enc_inputs)
             if True:
                 test_encoder_decoder_nse((train_loader, validate_loader), encoder, encoder_properties, decoder,
@@ -939,9 +951,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                                           dataset_properties, all_enc)
 
             flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
-            loss, huber_loss = compute_loss(criterion, flow, outputs)
-            nse_err = numpy_nse(loss.detach().numpy()).tolist()
-            local_loss_list.extend(nse_err)
+            nse_err, huber_loss = compute_loss(criterion, flow, outputs)
+            local_loss_list.extend(nse_err.tolist())
             loss_list.extend(nse_err)
 
             # Backprop and perform Adam optimisation
@@ -952,8 +963,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             #acc_list.append(error.item())
 
             #idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
-            if (idx + 1) % 300 == total_step % 50:
-
+            if idx in plot_idx:
                 try:
                     plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx,
                                   loss_list, output_epochs, outputs, total_step, validate_loss_list, nse_err)
@@ -962,37 +972,57 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
         encoder.eval()
         decoder.eval()
-        temp_validate_loss_list=[]
+        temp_validate_loss_list = []
+        sigs = ["runoff_ratio", "q_mean"]
+        temp_sig_list = {sig : [] for sig in sigs}
         for i, datapoints in enumerate(validate_loader):
             outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, None)
             flow = datapoints.flow_data  # b x t
-            loss, _ = compute_loss(criterion, flow, outputs)
-            nse_err = numpy_nse(loss.detach().numpy())
+            nse_err, _ = compute_loss(criterion, flow, outputs)
             temp_validate_loss_list.extend(nse_err)
-            if (i+1) % 100 == 0:
-                #print(f'Validation loss {i} = {loss.item()}'
-                #      .format(epoch + 1, output_epochs, i + 1, total_step, loss.item(),
-                #              str(np.around(error, decimals=3))))
+            for sig in sigs:
+                temp_sig_list[sig].extend(datapoints.signatures.loc[:, sig])  # maybe np.array(df)
+
+            if i in validate_plot_idx:
                 fig = plt.figure(figsize=(5, 5))
                 ax_input = fig.add_subplot(1, 1, 1)
                 plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties, nse_err)
                 fig.show()
 
-        #while len(validate_loss_list) < len(loss_list):
         validate_loss_list.extend(temp_validate_loss_list)
         print(f'Median validation NSE epoch {epoch} = {np.median(temp_validate_loss_list):.3f} training NSE {np.median(local_loss_list):.3f}')
 
-        fig = plt.figure(figsize=(2,2))
-        ax_hist = fig.add_subplot(1, 1, 1)
-        ax_hist.hist(temp_validate_loss_list)
-        ax_hist.set_title("Validation NSE")
-        fig.show()
+        if not ablation_test:
+            num_plots = len(sigs)+1
+            fig = plt.figure(figsize=(2*num_plots, 2))
+            ax_hist = fig.add_subplot(1, num_plots, 1)
+            ax_hist.hist(temp_validate_loss_list)
+            ax_hist.set_title("Validation NSE")
+            fig.show()
 
-        test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
+            i = 2
+            for sig in sigs:
+                ax_scatter = fig.add_subplot(1, num_plots, i)
+                ax_scatter.scatter(np.array(temp_sig_list[sig])/dataset_properties.sig_normalizers[sig], temp_validate_loss_list)
+                ax_scatter.set_title(f"{sig} vs NSE")
+                i += 1
+
+            fig.show()
+
+        if epoch % 10 == 0 and not ablation_test:
+            test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
+
+    return np.mean(temp_validate_loss_list)
+
+
+def plot_indices(num_plots, total_step):
+    num_plots = min(total_step, num_plots)
+    plot_idx = range(total_step / num_plots - 1, total_step, total_step / num_plots)
+    return plot_idx
 
 
 def plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx, loss_list,
@@ -1167,18 +1197,18 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
         break
 
 
-def train_test_everything():
+def train_test_everything(subsample_data):
     ConvNet.get_activation()
     batch_size = 128
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=1, batch_size=batch_size)
+        = load_inputs(subsample_data=subsample_data, batch_size=batch_size)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\59\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\60\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1214,8 +1244,11 @@ def train_test_everything():
     if pretrain:
         decoder = train_decoder_only_fakedata(encoder, encoder_properties, decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())
 
-    train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
-                          dataset_properties, model_store_path=model_store_path)
+    return train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
+                                 dataset_properties, model_store_path=model_store_path, ablation_test=(subsample_data <= 0))
 
 
-train_test_everything()
+validate_nse = []
+for i in range(50):
+    validate_nse.append(train_test_everything(0))
+    print(f"{validate_nse=}")
