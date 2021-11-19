@@ -891,7 +891,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
               {'params': decoder.inflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
               {'params': decoder.outflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
-              {'params': decoder.et_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate}
+              {'params': decoder.et_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
+              {'params': decoder.init_store_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
               ]
     encoder_params = []
     if encoder_properties.encoder_type != EncType.NoEncoder:
@@ -1177,7 +1178,7 @@ def train_test_everything():
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\57\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\59\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1195,7 +1196,7 @@ def train_test_everything():
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
     load_encoder = True
-    load_decoder = False
+    load_decoder = True
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
