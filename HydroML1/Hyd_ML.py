@@ -886,7 +886,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.005
+    coupled_learning_rate = 0.01 if ablation_test else 0.01
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -963,7 +963,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
             #acc_list.append(error.item())
 
             #idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
-            if idx in plot_idx:
+            if idx in plot_idx and (not ablation_test or epoch % 50 == 49):
                 try:
                     plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx,
                                   loss_list, output_epochs, outputs, total_step, validate_loss_list, nse_err)
@@ -1016,7 +1016,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
 
-    return np.mean(temp_validate_loss_list)
+    return temp_validate_loss_list
 
 
 def plot_indices(num_plots, total_step):
@@ -1248,7 +1248,37 @@ def train_test_everything(subsample_data):
                                  dataset_properties, model_store_path=model_store_path, ablation_test=(subsample_data <= 0))
 
 
-validate_nse = []
-for i in range(50):
-    validate_nse.append(train_test_everything(0))
-    print(f"{validate_nse=}")
+def do_ablation_test():
+    validate_nse = []
+    av_validation_nse = []
+    for i in range(50):
+        nse_vec=train_test_everything(0)
+        validate_nse.extend(nse_vec)
+        av_validation_nse.append(np.mean(nse_vec))
+        print(f"{validate_nse=}")
+        """av_validation_nse = validate_nse = [0.760361519228065, 0.7887318239147981, 0.8598326892321032, 0.822247961057023, 0.8329137232552882,
+                        0.8814370156750392, 0.729288177925064, 0.9167264184726958, 0.653989587876536, 0.9028509848582206,
+                        0.7912467708494446, 0.8750786356427543, 0.8875032659919914, 0.784083669155359, 0.7419288398423712,
+                        0.776499227286519, 0.8056803198811425, 0.9003291789264586, 0.8594159698620499, 0.8379255192697079,
+                        0.8387234943691637, 0.8104821527636779, 0.8103680331169703, 0.9307651587191255, 0.5719708004065628,
+                        0.8248672874976232, 0.7830040717780344, 0.7022324618665368, 0.798756746217778, 0.9185530003825878,
+                        0.8474815732785339, 0.8048295858090262, 0.8390862803179703, 0.8295103609497794, 0.7379636246308544,
+                        0.7174718764851915, 0.8268451441022849, 0.8264846298470157, 0.7504073483898394, 0.7170770000918334,
+                        0.8617014230621918, 0.797030462939229, 0.7881947474643892, 0.8946992400193083, 0.7637426938668238,
+                        0.855709364886427, 0.9219687866819595, 0.6180922899383545, 0.8258394432464596, 0.8560224425343363]
+        """
+        fig = plt.figure(figsize=(6, 3))
+        ax_hist = fig.add_subplot(1, 2, 1)
+        ax_hist.hist(validate_nse, 40)
+        ax_hist.set_title(f"Ablation validation NSE {i}")
+        ax_hist = fig.add_subplot(1, 2, 2)
+        ax_hist.hist(av_validation_nse, 40)
+        ax_hist.set_title(f"Mean Abl. validation NSE {i}")
+
+        print(f"Median NSE={np.median(validate_nse)}")
+
+        fig.show()
+
+
+#do_ablation_test()
+train_test_everything(1)
