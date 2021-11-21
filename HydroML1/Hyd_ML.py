@@ -20,18 +20,20 @@ import shapefile as shp
 def nse_loss(output, target):  # both inputs t x b
     num = torch.sum((output - target)**2, dim=[0])
     denom = torch.sum((target - torch.mean(target, dim=[0]).unsqueeze(0))**2, dim=[0])
-    #denom = denom.clamp(min=0.25*torch.median(denom))
-    loss = num/(denom.clamp(min=1))
+    loss = num/denom.clamp(min=1)
     if loss.shape[0] > 300:
         print("ERROR loss.shape={loss.shape}, should be batch size, likely mismatch with timesteps.")
 
-    hl = torch.nn.HuberLoss(delta=0.25)
-    huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
+    if False:
+        hl = torch.nn.HuberLoss(delta=0.25)
+        huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
+    else:
+        huber_loss = old_nse_loss(output, target)
 
     return numpy_nse(loss.detach().numpy()), huber_loss
 
 
-def old_nse_loss(output, target, reduce=True):  # both inputs t x b
+def old_nse_loss(output, target):  # both inputs t x b
     loss = torch.sum((output - target)**2)/torch.sum(target**2)
     return loss
 
@@ -886,7 +888,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01 if ablation_test else 0.01
+    coupled_learning_rate = 0.01 if ablation_test else 0.002
     output_epochs = 250
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -1021,7 +1023,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
 def plot_indices(num_plots, total_step):
     num_plots = min(total_step, num_plots)
-    plot_idx = range(total_step / num_plots - 1, total_step, total_step / num_plots)
+    plot_idx = range(total_step // num_plots - 1, total_step, total_step // num_plots)
     return plot_idx
 
 
@@ -1226,7 +1228,7 @@ def train_test_everything(subsample_data):
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
     load_encoder = True
-    load_decoder = True
+    load_decoder = False
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
