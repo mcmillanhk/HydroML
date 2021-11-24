@@ -24,7 +24,7 @@ def nse_loss(output, target):  # both inputs t x b
     if loss.shape[0] > 300:
         print("ERROR loss.shape={loss.shape}, should be batch size, likely mismatch with timesteps.")
 
-    if False:
+    if True:
         hl = torch.nn.HuberLoss(delta=0.25)
         huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
     else:
@@ -997,11 +997,10 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
         if not ablation_test:
             num_plots = len(sigs)+1
-            fig = plt.figure(figsize=(2*num_plots, 2))
+            fig = plt.figure(figsize=(4*num_plots, 4))
             ax_hist = fig.add_subplot(1, num_plots, 1)
             ax_hist.hist(temp_validate_loss_list)
             ax_hist.set_title("Validation NSE")
-            fig.show()
 
             i = 2
             for sig in sigs:
@@ -1210,7 +1209,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\60\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\64-E129\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1228,7 +1227,7 @@ def train_test_everything(subsample_data):
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
     load_encoder = True
-    load_decoder = False
+    load_decoder = True
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
