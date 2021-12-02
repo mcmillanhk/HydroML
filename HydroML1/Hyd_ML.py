@@ -16,6 +16,8 @@ from Util import *
 import random
 import shapefile as shp
 
+plotting_freq = 3
+
 # Return 1-nse as we will minimize this
 def nse_loss(output, target):  # both inputs t x b
     num = torch.sum((output - target)**2, dim=[0])
@@ -62,18 +64,20 @@ def load_inputs(subsample_data=1, batch_size=20):
     dataset_properties = DatasetProperties()
 
     train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, dataset_properties,
-                                     subsample_data=subsample_data)
+                                     subsample_data=subsample_data, ablation_train=True)
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-    if subsample_data == 0:
-        return train_loader, train_loader, None, dataset_properties
+    #if subsample_data == 0:
+    #    return train_loader, train_loader, None, dataset_properties
 
     test_dataset = None
     if load_test:
         test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
                                         dataset_properties, subsample_data=subsample_data)
-    validate_dataset = Cd.CamelsDataset(csv_file_validate, root_dir_climate, root_dir_signatures, root_dir_flow,
-                                        dataset_properties, subsample_data=subsample_data)
+    validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, root_dir_climate,
+                                        root_dir_signatures, root_dir_flow,
+                                        dataset_properties, subsample_data=subsample_data, ablation_validate=True,
+                                        gauge_id=train_loader.dataset[0].gauge_id.split('-')[0])
 
     # Data loader
     validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size,
@@ -888,8 +892,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01 if ablation_test else 0.002
-    output_epochs = 250
+    coupled_learning_rate = 0.01 if ablation_test else 0.001
+    output_epochs = 200
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
@@ -922,15 +926,15 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         plot_idx = [total_step-1]
         validate_plot_idx=[]
     else:
-        plot_idx = plot_indices(3, total_step)
-        validate_plot_idx = plot_indices(2, len(validate_loader))
+        plot_idx = plot_indices(plotting_freq, total_step)
+        validate_plot_idx = plot_indices(plotting_freq, len(validate_loader))
 
     loss_list = []
     #acc_list = []
     validate_loss_list = []
     for epoch in range(output_epochs):
         #restricted_input = False
-        if epoch % 10 == 0 and not ablation_test:
+        if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
             encoding_sensitivity(encoder, encoder_properties, dataset_properties, all_enc_inputs)
             if True:
                 test_encoder_decoder_nse((train_loader, validate_loader), encoder, encoder_properties, decoder,
@@ -995,7 +999,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         validate_loss_list.extend(temp_validate_loss_list)
         print(f'Median validation NSE epoch {epoch} = {np.median(temp_validate_loss_list):.3f} training NSE {np.median(local_loss_list):.3f}')
 
-        if not ablation_test:
+        if not ablation_test and plotting_freq>0:
             num_plots = len(sigs)+1
             fig = plt.figure(figsize=(4*num_plots, 4))
             ax_hist = fig.add_subplot(1, num_plots, 1)
@@ -1011,7 +1015,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
             fig.show()
 
-        if epoch % 10 == 0 and not ablation_test:
+        if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
             test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
@@ -1021,6 +1025,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
 
 def plot_indices(num_plots, total_step):
+    if num_plots == 0:
+        return []
     num_plots = min(total_step, num_plots)
     plot_idx = range(total_step // num_plots - 1, total_step, total_step // num_plots)
     return plot_idx
@@ -1209,7 +1215,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\64-E129\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\66-E480\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1257,17 +1263,7 @@ def do_ablation_test():
         validate_nse.extend(nse_vec)
         av_validation_nse.append(np.mean(nse_vec))
         print(f"{validate_nse=}")
-        """av_validation_nse = validate_nse = [0.760361519228065, 0.7887318239147981, 0.8598326892321032, 0.822247961057023, 0.8329137232552882,
-                        0.8814370156750392, 0.729288177925064, 0.9167264184726958, 0.653989587876536, 0.9028509848582206,
-                        0.7912467708494446, 0.8750786356427543, 0.8875032659919914, 0.784083669155359, 0.7419288398423712,
-                        0.776499227286519, 0.8056803198811425, 0.9003291789264586, 0.8594159698620499, 0.8379255192697079,
-                        0.8387234943691637, 0.8104821527636779, 0.8103680331169703, 0.9307651587191255, 0.5719708004065628,
-                        0.8248672874976232, 0.7830040717780344, 0.7022324618665368, 0.798756746217778, 0.9185530003825878,
-                        0.8474815732785339, 0.8048295858090262, 0.8390862803179703, 0.8295103609497794, 0.7379636246308544,
-                        0.7174718764851915, 0.8268451441022849, 0.8264846298470157, 0.7504073483898394, 0.7170770000918334,
-                        0.8617014230621918, 0.797030462939229, 0.7881947474643892, 0.8946992400193083, 0.7637426938668238,
-                        0.855709364886427, 0.9219687866819595, 0.6180922899383545, 0.8258394432464596, 0.8560224425343363]
-        """
+
         fig = plt.figure(figsize=(6, 3))
         ax_hist = fig.add_subplot(1, 2, 1)
         ax_hist.hist(validate_nse, 40)
@@ -1281,5 +1277,5 @@ def do_ablation_test():
         fig.show()
 
 
-#do_ablation_test()
-train_test_everything(1)
+do_ablation_test()
+#train_test_everything(1)

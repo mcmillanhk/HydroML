@@ -20,7 +20,7 @@ class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
     def __init__(self, csv_file, root_dir_climate, root_dir_signatures, root_dir_flow,
-                 dataset_properties: DatasetProperties, subsample_data):
+                 dataset_properties: DatasetProperties, subsample_data, ablation_train=False, ablation_validate=False, gauge_id=None):
         """
         Args:
             csv_file (string): Path to the csv file with signatures.
@@ -51,7 +51,6 @@ class CamelsDataset(Dataset):
             self.attrib_files[name] = self.attrib_files[name].transform(lambda x: x*normalizer)
             if np.isnan(self.attrib_files[name]).any():
                 median = np.nanmedian(self.attrib_files[name])
-                #self.attrib_files[name] = self.attrib_files[name].transform(lambda x: median if np.isnan(x) else x)
                 self.attrib_files[name][np.isnan(self.attrib_files[name])] = median
                 print("Replacing nan with median=" + str(median) + " in " + name)
 
@@ -110,10 +109,10 @@ class CamelsDataset(Dataset):
                 self.load_one_site(dataset_properties, idx_site)
         else:
             while len(self.all_items) == 0:
-                idx_site = np.random.randint(0, num_sites)
-                self.load_one_site(dataset_properties, idx_site)
+                idx_site = np.random.randint(0, num_sites) if gauge_id is None else self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].index[0]
+                self.load_one_site(dataset_properties, idx_site, ablation_train, ablation_validate)
 
-    def load_one_site(self, dataset_properties, idx_site):
+    def load_one_site(self, dataset_properties, idx_site, ablation_train=False, ablation_validate=False):
         """Read in climate and flow data for this site"""
         gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
         flow_data_name = self.get_streamflow_filename(gauge_id)
@@ -143,11 +142,16 @@ class CamelsDataset(Dataset):
         water_years = flow_data[select_water_year]
         indices = flow_data.index[select_water_year]
 
-        if water_years.shape[0] < dataset_properties.years_per_sample:
+        range_end = water_years.shape[0] - dataset_properties.years_per_sample
+        if ablation_train:
+            range_end = range_end - 3
+        range_start = (range_end - 3) if ablation_validate else 0
+
+        if range_start >= range_end:
             print("Insufficient data for site " + gauge_id)
             return
 
-        for year_idx in range(water_years.shape[0] - dataset_properties.years_per_sample):
+        for year_idx in range(range_start, range_end):
             record_start = water_years.iloc[year_idx]
             record_end = water_years.iloc[year_idx + dataset_properties.years_per_sample]
             if record_end['qc'] > record_start['qc']:
