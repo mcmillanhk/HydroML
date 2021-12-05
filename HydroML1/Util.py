@@ -247,4 +247,4 @@ def print_inputs(name, hyd_data):
     print(name + f' inputs max {torch.max(torch.max(hyd_data))}, mean {torch.mean(torch.mean(hyd_data))}')
 
 
-dropout_rate = 0  # 0.25
+dropout_rate = 0 # 0.33

@@ -109,7 +109,7 @@ class CamelsDataset(Dataset):
                 self.load_one_site(dataset_properties, idx_site)
         else:
             while len(self.all_items) == 0:
-                idx_site = np.random.randint(0, num_sites) if gauge_id is None else self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].index[0]
+                idx_site = np.random.randint(0, num_sites) if gauge_id is None else (self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].index[0]-1)
                 self.load_one_site(dataset_properties, idx_site, ablation_train, ablation_validate)
 
     def load_one_site(self, dataset_properties, idx_site, ablation_train=False, ablation_validate=False):

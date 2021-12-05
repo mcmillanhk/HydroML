@@ -88,6 +88,8 @@ def load_inputs(subsample_data=1, batch_size=20):
     #input_dim = 8 + len(attribs)
     #if sigs_as_input:
     #    input_dim = input_dim + len(train_dataset.sig_labels)
+    if subsample_data <= 0:
+        check_dataloaders(train_loader, validate_loader)
 
     return train_loader, validate_loader, test_loader, dataset_properties
 
@@ -885,6 +887,15 @@ def nse(loss):
 def numpy_nse(loss):
     return np.maximum(1-loss, 0)
 
+def check_dataloaders(train_loader, validate_loader):
+    gauge_id = None
+    for dataloader in (train_loader, validate_loader):
+        for item in dataloader:
+            this_gauge_id = DataPoint.to_id(item.gauge_id[0])
+            if gauge_id is None:
+                gauge_id = this_gauge_id
+            if this_gauge_id != gauge_id:
+                raise Exception(f"{this_gauge_id} != {gauge_id}")
 
 # Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
@@ -892,7 +903,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01 if ablation_test else 0.001
+    coupled_learning_rate = 0.001 if ablation_test else 0.001
     output_epochs = 200
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -909,7 +920,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay,
                             'lr': coupled_learning_rate/10}]
 
-    opt_decoder = torch.optim.Adam(decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
+    #opt_decoder = torch.optim.Adam(decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
     opt_full = torch.optim.Adam(encoder_params + decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
     optimizer = opt_full
 
@@ -919,109 +930,136 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
     randomize_encoding = False
     all_enc_inputs = all_encoder_inputs(train_loader, encoder_properties, dataset_properties)
-
-    total_step = len(train_loader)
+    val_enc_inputs = all_encoder_inputs(validate_loader, encoder_properties, dataset_properties)
 
     if ablation_test:
-        plot_idx = [total_step-1]
+        plot_idx = []
         validate_plot_idx=[]
     else:
-        plot_idx = plot_indices(plotting_freq, total_step)
+        plot_idx = plot_indices(plotting_freq, len(train_loader))
         validate_plot_idx = plot_indices(plotting_freq, len(validate_loader))
 
+    init_val_nse = run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
+                                   decoder_properties, encoder, encoder_properties, [], optimizer,
+                                   validate_plot_idx, randomize_encoding, validate_loader,
+                                   [])
+    print(f'Init median validation NSE = {np.median(init_val_nse):.3f}')
+
+    max_val_nse = init_val_nse
+
     loss_list = []
-    #acc_list = []
-    validate_loss_list = []
+    validate_loss_list = init_val_nse
     for epoch in range(output_epochs):
-        #restricted_input = False
         if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
             encoding_sensitivity(encoder, encoder_properties, dataset_properties, all_enc_inputs)
             if True:
                 test_encoder_decoder_nse((train_loader, validate_loader), encoder, encoder_properties, decoder,
                                          decoder_properties, dataset_properties)
 
-        local_loss_list = []
-        for idx, datapoints in enumerate(train_loader):
-            encoder.train()
-            decoder.train()
+        train_nse = run_dataloader_epoch(True, all_enc_inputs, criterion, dataset_properties, decoder,
+                                         decoder_properties, encoder, encoder_properties, loss_list, optimizer,
+                                         plot_idx, randomize_encoding, train_loader,
+                                         validate_loss_list)
+        loss_list.extend(train_nse)
 
-            if idx == -1:  #Only include encoder params after a few epochs
-                optimizer = opt_full
+        if ablation_test:
+            validate_plot_idx = [len(validate_loader)-1] if epoch % 50 == 49 else []
 
-            if randomize_encoding:
-                all_enc = all_encodings(datapoints, encoder, encoder_properties, all_enc_inputs)
-            else:
-                all_enc = one_encoding_per_run(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
+        val_nse = run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
+                                       decoder_properties, encoder, encoder_properties, loss_list, optimizer,
+                                       validate_plot_idx, randomize_encoding, validate_loader,
+                                       validate_loss_list)
+        validate_loss_list.extend(val_nse)
 
-            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
-                                          dataset_properties, all_enc)
-
-            flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
-            nse_err, huber_loss = compute_loss(criterion, flow, outputs)
-            local_loss_list.extend(nse_err.tolist())
-            loss_list.extend(nse_err)
-
-            # Backprop and perform Adam optimisation
-            optimizer.zero_grad()
-            huber_loss.backward()
-            optimizer.step()
-
-            #acc_list.append(error.item())
-
-            #idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
-            if idx in plot_idx and (not ablation_test or epoch % 50 == 49):
-                try:
-                    plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx,
-                                  loss_list, output_epochs, outputs, total_step, validate_loss_list, nse_err)
-                except Exception as e:
-                    print("Plotting error " + str(e))
-
-        encoder.eval()
-        decoder.eval()
-        temp_validate_loss_list = []
-        sigs = ["runoff_ratio", "q_mean"]
-        temp_sig_list = {sig : [] for sig in sigs}
-        for i, datapoints in enumerate(validate_loader):
-            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
-                                          dataset_properties, None)
-            flow = datapoints.flow_data  # b x t
-            nse_err, _ = compute_loss(criterion, flow, outputs)
-            temp_validate_loss_list.extend(nse_err)
-            for sig in sigs:
-                temp_sig_list[sig].extend(datapoints.signatures.loc[:, sig])  # maybe np.array(df)
-
-            if i in validate_plot_idx:
-                fig = plt.figure(figsize=(5, 5))
-                ax_input = fig.add_subplot(1, 1, 1)
-                plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties, nse_err)
-                fig.show()
-
-        validate_loss_list.extend(temp_validate_loss_list)
-        print(f'Median validation NSE epoch {epoch} = {np.median(temp_validate_loss_list):.3f} training NSE {np.median(local_loss_list):.3f}')
-
-        if not ablation_test and plotting_freq>0:
-            num_plots = len(sigs)+1
-            fig = plt.figure(figsize=(4*num_plots, 4))
-            ax_hist = fig.add_subplot(1, num_plots, 1)
-            ax_hist.hist(temp_validate_loss_list)
-            ax_hist.set_title("Validation NSE")
-
-            i = 2
-            for sig in sigs:
-                ax_scatter = fig.add_subplot(1, num_plots, i)
-                ax_scatter.scatter(np.array(temp_sig_list[sig])/dataset_properties.sig_normalizers[sig], temp_validate_loss_list)
-                ax_scatter.set_title(f"{sig} vs NSE")
-                i += 1
-
-            fig.show()
+        print(f'Median validation NSE epoch {epoch}/{output_epochs} = {np.median(val_nse):.3f} training NSE {np.median(train_nse):.3f}')
 
         if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
             test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
+        if ablation_test:
+            val_median = np.median(val_nse)
+            max_val_median = np.median(max_val_nse)
+            if val_median > max_val_median:
+                max_val_nse = val_nse
+            elif val_median < 0.9*max_val_median and epoch > 10:
+                break
+
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
 
-    return temp_validate_loss_list
+    return init_val_nse, max_val_nse
+
+
+def plot_sig_nse(dataset_properties, local_loss_list, sigs, temp_sig_list):
+    num_plots = len(sigs) + 1
+    fig = plt.figure(figsize=(4 * num_plots, 4))
+    ax_hist = fig.add_subplot(1, num_plots, 1)
+    ax_hist.hist(local_loss_list)
+    ax_hist.set_title("Validation NSE")
+
+    i = 2
+    for sig in sigs:
+        ax_scatter = fig.add_subplot(1, num_plots, i)
+        ax_scatter.scatter(np.array(temp_sig_list[sig]) / dataset_properties.sig_normalizers[sig],
+                           local_loss_list)
+        ax_scatter.set_title(f"{sig} vs NSE")
+        i += 1
+
+    fig.show()
+
+
+def run_dataloader_epoch(train, all_enc_inputs, criterion, dataset_properties, decoder, decoder_properties, encoder,
+                         encoder_properties, loss_list, optimizer, plot_idx, randomize_encoding,
+                         train_loader, validate_loss_list):
+
+    local_loss_list = []
+    sigs = ["runoff_ratio", "q_mean"]
+    temp_sig_list = {sig: [] for sig in sigs}
+
+    for idx, datapoints in enumerate(train_loader):
+        if train:
+            encoder.train()
+            decoder.train()
+        else:
+            encoder.eval()
+            decoder.eval()
+
+        if randomize_encoding:
+            all_enc = all_encodings(datapoints, encoder, encoder_properties, all_enc_inputs)
+        else:
+            all_enc = one_encoding_per_run(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
+
+        outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
+                                      dataset_properties, all_enc)
+
+        flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
+        nse_err, huber_loss = compute_loss(criterion, flow, outputs)
+
+        local_loss_list.extend(nse_err.tolist())
+
+        # Backprop and perform Adam optimisation
+        if train:
+            optimizer.zero_grad()
+            huber_loss.backward()
+            optimizer.step()
+        else:
+            for sig in sigs:
+                temp_sig_list[sig].extend(datapoints.signatures.loc[:, sig])  # maybe np.array(df)
+
+        # acc_list.append(error.item())
+
+        # idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
+        if idx in plot_idx:
+            try:
+                plot_training(train, datapoints, dataset_properties, decoder, flow, idx,
+                              loss_list, outputs, len(train_loader), validate_loss_list, nse_err)
+            except Exception as e:
+                print("Plotting error " + str(e))
+
+    if not train and plot_idx != []:
+        plot_sig_nse(dataset_properties, local_loss_list, sigs, temp_sig_list)
+
+    return local_loss_list
 
 
 def plot_indices(num_plots, total_step):
@@ -1032,24 +1070,21 @@ def plot_indices(num_plots, total_step):
     return plot_idx
 
 
-def plot_training(datapoints, dataset_properties, decoder, epoch, flow, idx, loss_list,
-                  output_epochs, outputs, total_step, validate_loss_list, nse_err: List[float]):
+def plot_training(train, datapoints, dataset_properties, decoder, flow, idx, loss_list,
+                  outputs, total_step, validate_loss_list, nse_err: List[float]):
 
     last_losses = np.array(loss_list)
     start = len(last_losses) - min(len(last_losses), 50)
     last_nse = np.mean(last_losses[start:])
-    print(f'Epoch {epoch} / {output_epochs}, Step {idx} / {total_step}, NSE: {last_nse}')
+    train_string = "Train" if train else "Validation"
+    print(f'{train_string}: Step {idx} / {total_step}, Train NSE: {last_nse}')
     rows = 2
     cols = 3
     fig = plt.figure(figsize=(16, 12))
+    fig.suptitle(train_string)
     ax_input = fig.add_subplot(rows, cols, 1)
     ax_loss = fig.add_subplot(rows, cols, 2)
-    # fig.canvas.draw()
     plot_model_flow_performance(ax_input, flow, datapoints, outputs, dataset_properties, nse_err)
-    #ax_loss.plot(acc_list, color='r')
-    #ax_loss.plot(moving_average(acc_list), color='#AA0000')
-    #ax_loss.set_ylabel("error (red)")
-    #ax2 = ax_loss.twinx()
     ax_loss.plot(loss_list, color='b', alpha=0.1)
     ax_loss.plot(moving_average(loss_list), color='#0000AA', alpha=0.6)
     ax_loss.set_ylabel("Train/val. NSE (blue/green)")
@@ -1215,7 +1250,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\66-E480\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\69\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1256,23 +1291,30 @@ def train_test_everything(subsample_data):
 
 
 def do_ablation_test():
-    validate_nse = []
-    av_validation_nse = []
+    init_validate_nse = []
+    final_validate_nse = []
+    av_init_validation_nse = []
+    av_final_validation_nse = []
     for i in range(50):
-        nse_vec=train_test_everything(0)
-        validate_nse.extend(nse_vec)
-        av_validation_nse.append(np.mean(nse_vec))
-        print(f"{validate_nse=}")
+        init_nse_vec, final_nse_vec=train_test_everything(0)
+        init_validate_nse.extend(init_nse_vec)
+        av_init_validation_nse.append(np.median(init_nse_vec))
+        final_validate_nse.extend(final_nse_vec)
+        av_final_validation_nse.append(np.median(final_nse_vec))
+        print(f"{av_final_validation_nse=}")
 
         fig = plt.figure(figsize=(6, 3))
         ax_hist = fig.add_subplot(1, 2, 1)
-        ax_hist.hist(validate_nse, 40)
-        ax_hist.set_title(f"Ablation validation NSE {i}")
-        ax_hist = fig.add_subplot(1, 2, 2)
-        ax_hist.hist(av_validation_nse, 40)
-        ax_hist.set_title(f"Mean Abl. validation NSE {i}")
+        ax_hist_av = fig.add_subplot(1, 2, 2)
 
-        print(f"Median NSE={np.median(validate_nse)}")
+        for nse, nse_av, col in ((init_validate_nse, av_init_validation_nse, 'g'), (final_validate_nse, av_final_validation_nse, 'r')):
+            ax_hist.hist(nse, 40, color=col, alpha=0.4, density=True)
+            ax_hist_av.hist(nse_av, 40, color=col, alpha=0.4, density=True)
+
+        ax_hist.set_title(f"Ablation validation NSE {i}")
+        ax_hist_av.set_title(f"Median Abl. validation NSE {i}")
+
+        print(f"Median init NSE={np.median(init_nse_vec)} final NSE={np.median(final_nse_vec)}")
 
         fig.show()
 
