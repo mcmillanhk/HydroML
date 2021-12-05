@@ -67,9 +67,6 @@ def load_inputs(subsample_data=1, batch_size=20):
                                      subsample_data=subsample_data, ablation_train=True)
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-    #if subsample_data == 0:
-    #    return train_loader, train_loader, None, dataset_properties
-
     test_dataset = None
     if load_test:
         test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
