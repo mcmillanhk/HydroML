@@ -64,7 +64,7 @@ def load_inputs(subsample_data=1, batch_size=20):
     dataset_properties = DatasetProperties()
 
     train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, dataset_properties,
-                                     subsample_data=subsample_data, ablation_train=True)
+                                     subsample_data=subsample_data, ablation_train=True) # , gauge_id='02430085'
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
     test_dataset = None
@@ -900,7 +900,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.001 if ablation_test else 0.001
+    coupled_learning_rate = 0.003 if ablation_test else 0.001
     output_epochs = 200
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -945,7 +945,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     max_val_nse = init_val_nse
 
     loss_list = []
-    validate_loss_list = init_val_nse
+    validate_loss_list = init_val_nse.copy()
     for epoch in range(output_epochs):
         if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
             encoding_sensitivity(encoder, encoder_properties, dataset_properties, all_enc_inputs)
