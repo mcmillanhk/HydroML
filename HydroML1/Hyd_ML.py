@@ -882,7 +882,7 @@ def nse(loss):
 
 
 def numpy_nse(loss):
-    return np.maximum(1-loss, 0)
+    return np.maximum(1-loss, -1)
 
 def check_dataloaders(train_loader, validate_loader):
     gauge_id = None
@@ -900,7 +900,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.003 if ablation_test else 0.001
+    coupled_learning_rate = 0.003 if ablation_test else 0.003
     output_epochs = 200
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -1247,7 +1247,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\69\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\72\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1265,7 +1265,7 @@ def train_test_everything(subsample_data):
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
     load_encoder = True
-    load_decoder = True
+    load_decoder = False
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
@@ -1316,5 +1316,5 @@ def do_ablation_test():
         fig.show()
 
 
-do_ablation_test()
-#train_test_everything(1)
+#do_ablation_test()
+train_test_everything(1)

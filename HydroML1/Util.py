@@ -158,7 +158,7 @@ class DecoderProperties:
             SNOW_STORE = STORE_DIM-1
 
         def __init__(self):
-            #store_weights normalize stores when used as input
+            #store_weights normalize stores when used as input [UNUSED--log them instead]
             self.store_weights = torch.ones((1, self.Indices.STORE_DIM))*0.001
             self.store_weights[0, self.Indices.SURFACE_STORE]=0.1
             self.store_weights[0, self.Indices.SNOW_STORE]=0.01
@@ -181,7 +181,7 @@ class DecoderProperties:
         flownet_intermediate_output_dim = 20
         num_layers = 4
         flow_between_stores = False  #Allow flow between stores; otherwise they're all connected only to out flow
-        decoder_include_stores = False
+        decoder_include_stores = True
         decoder_include_fixed = False
 
         def b_length(self):
@@ -193,9 +193,9 @@ class DecoderProperties:
 
         def input_dim2(self, dataset_properties: DatasetProperties, encoding_dim: int):
             total_dim = len(dataset_properties.climate_norm) + encoding_dim
-            if self.decoder_include_stores:
-                total_dim += len(dataset_properties.sig_normalizers) + len(dataset_properties.attrib_normalizers)
             if self.decoder_include_fixed:
+                total_dim += len(dataset_properties.sig_normalizers) + len(dataset_properties.attrib_normalizers)
+            if self.decoder_include_stores:
                 total_dim += self.Indices.STORE_DIM
             return total_dim
 

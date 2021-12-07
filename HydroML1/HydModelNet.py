@@ -136,8 +136,9 @@ class HydModelNet(nn.Module):
 
             climate_input = datapoints.climate_data[:, i, :]
             if self.decoder_properties.decoder_include_stores:
+                log_stores = stores.clamp(min=0.1).log()
                 inputs = torch.cat((climate_input, fixed_data,
-                                self.decoder_properties.store_weights*stores), 1)  # b x i
+                                    log_stores), 1)  # b x i
             else:
                 inputs = torch.cat((climate_input, fixed_data), 1)  # b x i
 
