@@ -35,6 +35,8 @@ class HydModelNet(nn.Module):
         self.storelog = None
         self.petlog = None
 
+        self.weight_stores = 1
+
         #def parameters(self, recurse=True):
     def store_dim(self):
         return self.decoder_properties.Indices.STORE_DIM
@@ -138,7 +140,7 @@ class HydModelNet(nn.Module):
             if self.decoder_properties.decoder_include_stores:
                 log_stores = stores.clamp(min=0.1).log()
                 inputs = torch.cat((climate_input, fixed_data,
-                                    log_stores), 1)  # b x i
+                                    log_stores*self.weight_stores), 1)  # b x i
             else:
                 inputs = torch.cat((climate_input, fixed_data), 1)  # b x i
 

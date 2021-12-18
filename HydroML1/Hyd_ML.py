@@ -900,8 +900,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.003 if ablation_test else 0.003
-    output_epochs = 200
+    coupled_learning_rate = 0.01 if ablation_test else 0.0003
+    output_epochs = 800
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
@@ -942,6 +942,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                                    [])
     print(f'Init median validation NSE = {np.median(init_val_nse):.3f}')
 
+    decoder.weight_stores = 0.001
+
     max_val_nse = init_val_nse
 
     loss_list = []
@@ -969,6 +971,11 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         validate_loss_list.extend(val_nse)
 
         print(f'Median validation NSE epoch {epoch}/{output_epochs} = {np.median(val_nse):.3f} training NSE {np.median(train_nse):.3f}')
+
+        """if np.median(val_nse)>0.4:
+            decoder.weight_stores=1
+        elif np.median(val_nse)>0.2:
+            decoder.weight_stores=0.2"""
 
         if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
             test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
@@ -1247,7 +1254,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\72\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\80-E213\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1265,7 +1272,7 @@ def train_test_everything(subsample_data):
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
     load_encoder = True
-    load_decoder = False
+    load_decoder = True
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
