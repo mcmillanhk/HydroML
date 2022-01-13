@@ -148,7 +148,7 @@ class ConvNet(nn.Module):
         out = self.layer4(out)
         out = out.reshape(out.size(0), -1)
         if self.encoder_properties.encode_attributes:
-            out = torch.cat((out, attribs), axis=1)
+            out = torch.cat((out, attribs), axis=1) # out: b x i attribs: b x i
         # out = self.drop_out(out)
         out = self.fc1(out)
         out = self.fc2(out)
@@ -402,7 +402,7 @@ def one_encoding_per_run(datapoint: DataPoint, encoder: nn.Module, encoder_prope
     encoder_input_dim1 = first_enc_input[0].shape[1]
     encoder_input_dim2 = first_enc_input[0].shape[2]
     batch_size = len(datapoint.gauge_id_int)
-    hyd_data_dim = None if first_enc_input[1] is None else first_enc_input[1].shape[0]
+    hyd_data_dim = None if first_enc_input[1] is None else first_enc_input[1].shape[1]
     encoder_inputs = torch.zeros((batch_size, encoder_input_dim1, encoder_input_dim2), dtype=torch.double)
     hyd_data = None if hyd_data_dim is None else torch.zeros((batch_size, hyd_data_dim), dtype=torch.double)
     idx = 0
@@ -1254,7 +1254,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\80-E213\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\82\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1271,8 +1271,8 @@ def train_test_everything(subsample_data):
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = True
-    load_decoder = True
+    load_encoder = False
+    load_decoder = False
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
@@ -1324,4 +1324,4 @@ def do_ablation_test():
 
 
 #do_ablation_test()
-train_test_everything(1)
+train_test_everything(100)

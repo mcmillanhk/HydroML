@@ -56,11 +56,11 @@ class HydModelNet(nn.Module):
     def make_outflow_layer(output_dim, decoder_properties: DecoderProperties.HydModelNetProperties):
         layer = nn.Linear(decoder_properties.flownet_intermediate_output_dim, output_dim)
 
-        if decoder_properties.scale_b: # now we weight the output instead
+        if decoder_properties.scale_b: # in this case we weight the output instead
             #layers = [layer, nn.ReLU()]  # output >=0
             layers = [layer, nn.Softplus()]  # output >=0
         else:
-            layer.bias.data -= 3  # Make the initial values generally small
+            layer.bias.data -= 5  # Make the initial values generally small
             layers = [layer, nn.Sigmoid()]  # output in 0..1
 
         return nn.Sequential(*layers)
