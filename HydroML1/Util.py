@@ -13,7 +13,7 @@ class EncType(Enum):
 
 
 class DatasetProperties:
-    years_per_sample = 2
+    years_per_sample = 1
     length_days: int = 365 * years_per_sample
 
     #  attribs: dict of attrib/normalizing factor for each site

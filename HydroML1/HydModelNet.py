@@ -11,6 +11,7 @@ class HydModelNet(nn.Module):
         super(HydModelNet, self).__init__()
 
         input_dim = decoder_properties.input_dim2(dataset_properties, encoding_dim)
+        self.use_sigmoid = False
 
         self.decoder_properties = decoder_properties
         self.dataset_properties = dataset_properties
@@ -47,8 +48,11 @@ class HydModelNet(nn.Module):
             this_input_dim = input_dim if i == 0 else hidden_dim
             this_output_dim = hidden_dim if i < num_layers-1 else self.decoder_properties.flownet_intermediate_output_dim
             layers.append(nn.Linear(this_input_dim, this_output_dim))
-            layers.append(nn.Sigmoid())
-            if i > 0 and i < num_layers-1:
+            if self.use_sigmoid:
+                layers.append(nn.Sigmoid())
+            else:
+                layers.append(nn.ReLU())
+            if i > 0 and i < num_layers-1 and dropout_rate > 0:
                 layers.append(nn.Dropout(dropout_rate))
         return nn.Sequential(*layers)
 
@@ -62,6 +66,7 @@ class HydModelNet(nn.Module):
         else:
             layer.bias.data -= 5  # Make the initial values generally small
             layers = [layer, nn.Sigmoid()]  # output in 0..1
+
 
         return nn.Sequential(*layers)
 
@@ -172,6 +177,10 @@ class HydModelNet(nn.Module):
 
             self.outflowlog[i, :] = b[0, :].detach()
 
+            if torch.max(np.isnan(b.data)) == 1:
+                raise Exception("NaN in b")
+            #print("b is ok")
+
             if b.min() < 0 or b.max() > 1:
                 raise Exception("Relative outflow flux outside [0,1]\n" + str(b))
 
@@ -191,6 +200,15 @@ class HydModelNet(nn.Module):
 
             b_flow = b[:, (-num_stores):]
             flow_distn = b_flow * stores
+
+            if torch.max(np.isnan(b_flow.data)) == 1:
+                raise Exception("NaN in b_flow")
+            if torch.max(np.isnan(stores.data)) == 1:
+                raise Exception("NaN in stores")
+
+            if torch.max(np.isnan(flow_distn.data)) == 1:
+                raise Exception("NaN in flow_distn")
+
             stores = stores - flow_distn
 
             if stores.min() < 0:
@@ -209,5 +227,7 @@ class HydModelNet(nn.Module):
         if flows.min() < 0:
             raise Exception("Negative flow")
 
+        if torch.max(np.isnan(flows.data)) == 1:
+            raise Exception("Negative flow")
 
         return flows

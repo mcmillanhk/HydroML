@@ -900,7 +900,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01 if ablation_test else 0.0003
+    coupled_learning_rate = 0.01 if ablation_test else 0.0001
     output_epochs = 800
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -1043,7 +1043,7 @@ def run_dataloader_epoch(train, all_enc_inputs, criterion, dataset_properties, d
 
         # Backprop and perform Adam optimisation
         if train:
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             huber_loss.backward()
             optimizer.step()
         else:
@@ -1254,7 +1254,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\82\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\88\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1271,8 +1271,8 @@ def train_test_everything(subsample_data):
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = False
-    load_decoder = False
+    load_encoder = True
+    load_decoder = True
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
@@ -1324,4 +1324,4 @@ def do_ablation_test():
 
 
 #do_ablation_test()
-train_test_everything(100)
+train_test_everything(1)
