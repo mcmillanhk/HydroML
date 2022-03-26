@@ -133,9 +133,12 @@ class EncoderProperties:
         hyd_data = torch.cat((datapoint.flow_data*self.flow_normalizer, datapoint.climate_data[:, :, indices]), dim=2)\
             .permute(0, 2, 1)  # i x t x b -> b x i x t
         fixed_data = None if not self.encode_attributes \
-            else torch.cat((torch.tensor(np.array(datapoint.signatures)),
+            else torch.cat((torch.tensor(np.array(datapoint.signatures)), # match with encoding_names()
                             torch.tensor(np.array(datapoint.attributes))), 1)
         return (hyd_data, fixed_data)
+
+    def encoding_names(dataset_properties: DatasetProperties):
+        return list(dataset_properties.sig_normalizers.keys()) + list(dataset_properties.attrib_normalizers.keys())
 
 
 class DecoderType(Enum):

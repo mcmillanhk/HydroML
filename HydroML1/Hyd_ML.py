@@ -16,7 +16,7 @@ from Util import *
 import random
 import shapefile as shp
 
-plotting_freq = 3
+plotting_freq = 1
 
 # Return 1-nse as we will minimize this
 def nse_loss(output, target):  # both inputs t x b
@@ -26,10 +26,15 @@ def nse_loss(output, target):  # both inputs t x b
     if loss.shape[0] > 300:
         print("ERROR loss.shape={loss.shape}, should be batch size, likely mismatch with timesteps.")
 
-    if True:
+    if False:
+        # Huber-damped loss
         hl = torch.nn.HuberLoss(delta=0.25)
         huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
+    elif True:
+        # Plain NSE loss
+        return numpy_nse(loss.detach().numpy()), loss.mean()
     else:
+        # Basically least-squares
         huber_loss = old_nse_loss(output, target)
 
     return numpy_nse(loss.detach().numpy()), huber_loss
@@ -430,6 +435,8 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
     encoder.eval()
     encodings = {}
     sums = {}
+    names = {}
+    en = EncoderProperties.encoding_names(dataset_properties)
     for gauge_id, input_tuple in all_enc_inputs.items():
         if encoder_properties.encoder_type == EncType.LSTMEncoder:
             encoder.hidden = encoder.init_hidden().detach()
@@ -445,6 +452,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
             if col not in sums:
                 sums[col] = 0
             sums[col] += delta
+            names[col] = "Flow" if col == 0 else EncoderProperties.encoder_names[col-1]
 
         if input_fixed is not None:
             for col in range(input_fixed.shape[1]):
@@ -452,15 +460,20 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
                 input_fixed1[:, col] += 0.1
                 encoding1 = encoder((input_flow, input_fixed1)).detach()
                 delta = encoding_diff(encoding, encoding1)
-                key = col + 20
+                key = col + 10
                 if key not in sums:
                     sums[key] = 0
                 sums[key] += delta
+                names[key] = en[col]
 
     print(sums)
-    fig = plt.figure(figsize=(4, 4))
+    fig = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(1, 1, 1)
     ax.plot(sums.keys(), sums.values())
+    ax.set_xticks(list(names.keys()))
+    ax.set_xticklabels(names.values(), rotation='vertical', fontsize=6)
+    ax.tight_layout()
+    ax.grid(True)
     ax.set_title(f'Encoding sensitivity')
 
     plt.show()
@@ -900,7 +913,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01 if ablation_test else 0.0001
+    coupled_learning_rate = 0.01 if ablation_test else 0.001
     output_epochs = 800
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -936,13 +949,13 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         plot_idx = plot_indices(plotting_freq, len(train_loader))
         validate_plot_idx = plot_indices(plotting_freq, len(validate_loader))
 
+    decoder.weight_stores = 0.001
+
     init_val_nse = run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
                                    decoder_properties, encoder, encoder_properties, [], optimizer,
                                    validate_plot_idx, randomize_encoding, validate_loader,
                                    [])
     print(f'Init median validation NSE = {np.median(init_val_nse):.3f}')
-
-    decoder.weight_stores = 0.001
 
     max_val_nse = init_val_nse
 
@@ -1104,9 +1117,9 @@ def plot_training(train, datapoints, dataset_properties, decoder, flow, idx, los
     ax_outputrates.plot(decoder.outflowlog)
     ax_outputrates.set_title("b (outflow factors)")
     ax_stores = fig.add_subplot(rows, cols, 5)
-    ax_stores.plot(decoder.storelog)
+    ax_stores.plot(decoder.storelog.clip(0.01))
     ax_stores.set_title("Stores")
-    if np.min(np.min(decoder.storelog)) > 0:
+    if np.max(np.max(decoder.storelog)) > 100:  # np.min(np.min(decoder.storelog)) > 0:
         ax_stores.set_yscale('log')
     ax_pet = fig.add_subplot(rows, cols, 6)
     ax_pet.plot(decoder.petlog, color='r', label="PET (mm)")
@@ -1254,7 +1267,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\88\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\90\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
