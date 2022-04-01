@@ -2,6 +2,28 @@
 #import torch.nn as nn
 import numpy as np
 import torch
+from backpack import backpack, extend
+from backpack.extensions import (
+    GGNMP,
+    HMP,
+    KFAC,
+    KFLR,
+    KFRA,
+    PCHMP,
+    BatchDiagGGNExact,
+    BatchDiagGGNMC,
+    BatchDiagHessian,
+    BatchGrad,
+    BatchL2Grad,
+    DiagGGNExact,
+    DiagGGNMC,
+    DiagHessian,
+    SqrtGGNExact,
+    SqrtGGNMC,
+    SumGradSquared,
+    Variance,
+)
+
 from matplotlib.collections import LineCollection
 from torch.utils.data import DataLoader
 #import numpy as np
@@ -472,7 +494,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
     ax.plot(sums.keys(), sums.values())
     ax.set_xticks(list(names.keys()))
     ax.set_xticklabels(names.values(), rotation='vertical', fontsize=6)
-    ax.tight_layout()
+    fig.tight_layout()
     ax.grid(True)
     ax.set_title(f'Encoding sensitivity')
 
@@ -950,8 +972,9 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         validate_plot_idx = plot_indices(plotting_freq, len(validate_loader))
 
     decoder.weight_stores = 0.001
+    er = EpochRunner()
 
-    init_val_nse = run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
+    init_val_nse = er.run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
                                    decoder_properties, encoder, encoder_properties, [], optimizer,
                                    validate_plot_idx, randomize_encoding, validate_loader,
                                    [])
@@ -968,7 +991,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                 test_encoder_decoder_nse((train_loader, validate_loader), encoder, encoder_properties, decoder,
                                          decoder_properties, dataset_properties)
 
-        train_nse = run_dataloader_epoch(True, all_enc_inputs, criterion, dataset_properties, decoder,
+        train_nse = er.run_dataloader_epoch(True, all_enc_inputs, criterion, dataset_properties, decoder,
                                          decoder_properties, encoder, encoder_properties, loss_list, optimizer,
                                          plot_idx, randomize_encoding, train_loader,
                                          validate_loss_list)
@@ -977,7 +1000,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         if ablation_test:
             validate_plot_idx = [len(validate_loader)-1] if epoch % 50 == 49 else []
 
-        val_nse = run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
+        val_nse = er.run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
                                        decoder_properties, encoder, encoder_properties, loss_list, optimizer,
                                        validate_plot_idx, randomize_encoding, validate_loader,
                                        validate_loss_list)
@@ -1024,59 +1047,102 @@ def plot_sig_nse(dataset_properties, local_loss_list, sigs, temp_sig_list):
 
     fig.show()
 
+class EpochRunner:
+    def __init__(self):
+        self.vals = {}
+        self.grads = {}
 
-def run_dataloader_epoch(train, all_enc_inputs, criterion, dataset_properties, decoder, decoder_properties, encoder,
-                         encoder_properties, loss_list, optimizer, plot_idx, randomize_encoding,
-                         train_loader, validate_loss_list):
+    def examine(self, name, param):
+        self.examine_val(name + '-val', param.detach().flatten())
+        if param.grad is not None:
+            self.examine_grad(name + '-grad', param.grad.flatten())
+        #print(".diag_h.shape:           ", param.diag_h.shape)
+        #print(".diag_h_batch.shape:     ", param.diag_h_batch.shape)
 
-    local_loss_list = []
-    sigs = ["runoff_ratio", "q_mean"]
-    temp_sig_list = {sig: [] for sig in sigs}
+    def examine_val(self, label, val):
+        self.print_tensor(label, val)
+        if label in self.vals:
+            old_val = self.vals[label]
+            rel_change = (val - old_val)/old_val.abs().clip(1e-8)
+            self.print_tensor(label+'-rel-change', rel_change)
+            abs_change = (val - old_val).mean().item()
+            rel_total_change = abs_change/old_val.mean().item()
+            print(label + f" {abs_change=} {rel_total_change=}")
+        self.vals[label] = val.clone()
 
-    for idx, datapoints in enumerate(train_loader):
-        if train:
-            encoder.train()
-            decoder.train()
-        else:
-            encoder.eval()
-            decoder.eval()
+    def examine_grad(self, label, grad):
+        self.print_tensor(label, grad)
+        if label in self.grads:
+            old_grad = self.grads[label]
+            direction = (nn.functional.normalize(grad,dim=0)*nn.functional.normalize(old_grad,dim=0)).sum().item()
+            proportion_same_dir = (grad*old_grad > 0).sum().item()/grad.shape[0]
+            print(label + f" {proportion_same_dir=} {direction=}")
 
-        if randomize_encoding:
-            all_enc = all_encodings(datapoints, encoder, encoder_properties, all_enc_inputs)
-        else:
-            all_enc = one_encoding_per_run(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
+        self.grads[label] = grad.clone()
 
-        outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
-                                      dataset_properties, all_enc)
+    def print_tensor(self, label, param):
+        if param is not None:
+            print(
+                f"{label}: shape{param.shape[0]} mean={param.mean().mean().mean()} "
+                f"median={param.median().median().median()} max={param.max().max().max()} ")
 
-        flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
-        nse_err, huber_loss = compute_loss(criterion, flow, outputs)
+    def run_dataloader_epoch(self, train, all_enc_inputs, criterion, dataset_properties, decoder, decoder_properties, encoder,
+                             encoder_properties, loss_list, optimizer, plot_idx, randomize_encoding,
+                             train_loader, validate_loss_list):
 
-        local_loss_list.extend(nse_err.tolist())
+        local_loss_list = []
+        sigs = ["runoff_ratio", "q_mean"]
+        temp_sig_list = {sig: [] for sig in sigs}
 
-        # Backprop and perform Adam optimisation
-        if train:
-            optimizer.zero_grad(set_to_none=True)
-            huber_loss.backward()
-            optimizer.step()
-        else:
-            for sig in sigs:
-                temp_sig_list[sig].extend(datapoints.signatures.loc[:, sig])  # maybe np.array(df)
+        for idx, datapoints in enumerate(train_loader):
+            if train:
+                encoder.train()
+                decoder.train()
+            else:
+                encoder.eval()
+                decoder.eval()
 
-        # acc_list.append(error.item())
+            if randomize_encoding:
+                all_enc = all_encodings(datapoints, encoder, encoder_properties, all_enc_inputs)
+            else:
+                all_enc = one_encoding_per_run(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
 
-        # idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
-        if idx in plot_idx:
-            try:
-                plot_training(train, datapoints, dataset_properties, decoder, flow, idx,
-                              loss_list, outputs, len(train_loader), validate_loss_list, nse_err)
-            except Exception as e:
-                print("Plotting error " + str(e))
+            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
+                                          dataset_properties, all_enc)
 
-    if not train and plot_idx != []:
-        plot_sig_nse(dataset_properties, local_loss_list, sigs, temp_sig_list)
+            flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
+            nse_err, huber_loss = compute_loss(criterion, flow, outputs)
 
-    return local_loss_list
+            local_loss_list.extend(nse_err.tolist())
+
+            # Backprop and perform Adam optimisation
+            if train:
+                optimizer.zero_grad(set_to_none=True)
+                #with backpack(DiagHessian(), BatchDiagHessian()):
+                huber_loss.backward()
+                optimizer.step()
+
+                for netname, net in {'encoder-': encoder, 'decoder-': decoder}.items():
+                    for name, param in net.named_parameters():
+                        self.examine(netname+name, param)
+            else:
+                for sig in sigs:
+                    temp_sig_list[sig].extend(datapoints.signatures.loc[:, sig])  # maybe np.array(df)
+
+            # acc_list.append(error.item())
+
+            # idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
+            if idx in plot_idx:
+                try:
+                    plot_training(train, datapoints, dataset_properties, decoder, flow, idx,
+                                  loss_list, outputs, len(train_loader), validate_loss_list, nse_err)
+                except Exception as e:
+                    print("Plotting error " + str(e))
+
+        if not train and plot_idx != []:
+            plot_sig_nse(dataset_properties, local_loss_list, sigs, temp_sig_list)
+
+        return local_loss_list
 
 
 def plot_indices(num_plots, total_step):
@@ -1336,5 +1402,6 @@ def do_ablation_test():
         fig.show()
 
 
+torch.manual_seed(0)
 #do_ablation_test()
-train_test_everything(1)
+train_test_everything(5)
