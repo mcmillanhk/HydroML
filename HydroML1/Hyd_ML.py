@@ -1,34 +1,5 @@
-#import torch
-#import torch.nn as nn
-import numpy as np
-import torch
-from backpack import backpack, extend
-from backpack.extensions import (
-    GGNMP,
-    HMP,
-    KFAC,
-    KFLR,
-    KFRA,
-    PCHMP,
-    BatchDiagGGNExact,
-    BatchDiagGGNMC,
-    BatchDiagHessian,
-    BatchGrad,
-    BatchL2Grad,
-    DiagGGNExact,
-    DiagGGNMC,
-    DiagHessian,
-    SqrtGGNExact,
-    SqrtGGNMC,
-    SumGradSquared,
-    Variance,
-)
-
-from matplotlib.collections import LineCollection
 from torch.utils.data import DataLoader
-#import numpy as np
 import CAMELS_data as Cd
-from DataPoint import *
 import os
 import math
 import matplotlib.pyplot as plt
@@ -48,7 +19,7 @@ def nse_loss(output, target):  # both inputs t x b
     if loss.shape[0] > 300:
         print("ERROR loss.shape={loss.shape}, should be batch size, likely mismatch with timesteps.")
 
-    if False:
+    if True:
         # Huber-damped loss
         hl = torch.nn.HuberLoss(delta=0.25)
         huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
@@ -305,7 +276,13 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     if False:
         print("Correlation matrix:")
         print(M)
-    u, s, vh = np.linalg.svd(M)
+
+    try:
+        u, s, vh = np.linalg.svd(M)
+    except np.linalg.LinAlgError:
+        print ("SVD failed: numpy.linalg.LinAlgError")
+        return
+
     print(f"sv: {s}")
 
     S = np.corrcoef(encodings, sigs, rowvar=False)
@@ -935,7 +912,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01 if ablation_test else 0.001
+    coupled_learning_rate = 0.01 if ablation_test else 0.1
     output_epochs = 800
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -950,7 +927,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     encoder_params = []
     if encoder_properties.encoder_type != EncType.NoEncoder:
         encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay,
-                            'lr': coupled_learning_rate/10}]
+                            'lr': coupled_learning_rate/1}]
 
     #opt_decoder = torch.optim.Adam(decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
     opt_full = torch.optim.Adam(encoder_params + decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
@@ -1065,8 +1042,8 @@ class EpochRunner:
             old_val = self.vals[label]
             rel_change = (val - old_val)/old_val.abs().clip(1e-8)
             self.print_tensor(label+'-rel-change', rel_change)
-            abs_change = (val - old_val).mean().item()
-            rel_total_change = abs_change/old_val.mean().item()
+            abs_change = (val - old_val).abs().mean().item()
+            rel_total_change = abs_change/old_val.abs().mean().item()
             print(label + f" {abs_change=} {rel_total_change=}")
         self.vals[label] = val.clone()
 
@@ -1083,8 +1060,8 @@ class EpochRunner:
     def print_tensor(self, label, param):
         if param is not None:
             print(
-                f"{label}: shape{param.shape[0]} mean={param.mean().mean().mean()} "
-                f"median={param.median().median().median()} max={param.max().max().max()} ")
+                f"{label}: shape{param.shape[0]} mean={param.abs().mean().mean().mean()} "
+                f"median={param.abs().median().median().median()} max={param.abs().max().max().max()} ")
 
     def run_dataloader_epoch(self, train, all_enc_inputs, criterion, dataset_properties, decoder, decoder_properties, encoder,
                              encoder_properties, loss_list, optimizer, plot_idx, randomize_encoding,
@@ -1118,13 +1095,11 @@ class EpochRunner:
             # Backprop and perform Adam optimisation
             if train:
                 optimizer.zero_grad(set_to_none=True)
-                #with backpack(DiagHessian(), BatchDiagHessian()):
                 huber_loss.backward()
                 optimizer.step()
 
-                for netname, net in {'encoder-': encoder, 'decoder-': decoder}.items():
-                    for name, param in net.named_parameters():
-                        self.examine(netname+name, param)
+                if False:
+                    self.debug_gradients(decoder, encoder)
             else:
                 for sig in sigs:
                     temp_sig_list[sig].extend(datapoints.signatures.loc[:, sig])  # maybe np.array(df)
@@ -1143,6 +1118,11 @@ class EpochRunner:
             plot_sig_nse(dataset_properties, local_loss_list, sigs, temp_sig_list)
 
         return local_loss_list
+
+    def debug_gradients(self, decoder, encoder):
+        for netname, net in {'encoder-': encoder, 'decoder-': decoder}.items():
+            for name, param in net.named_parameters():
+                self.examine(netname + name, param)
 
 
 def plot_indices(num_plots, total_step):
@@ -1350,8 +1330,8 @@ def train_test_everything(subsample_data):
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
     #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = True
-    load_decoder = True
+    load_encoder = False
+    load_decoder = False
     pretrain = False and not load_decoder
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
