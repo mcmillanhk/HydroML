@@ -115,6 +115,11 @@ class EncoderProperties:
     encode_signatures = False
     encode_hydro_met_data = False
 
+    @staticmethod
+    def get_activation():
+        #torch.nn.Sigmoid()
+        return torch.nn.ReLU()
+
     def encoding_dim(self):
         return 0 if self.encoder_type == EncType.NoEncoder else 16
 
@@ -132,7 +137,8 @@ class EncoderProperties:
 
     def select_encoder_inputs(self, datapoint: DataPoint, dataset_properties: DatasetProperties):
         indices = get_indices(self.encoder_names, dataset_properties.climate_norm.keys())
-        hyd_data = torch.cat((datapoint.flow_data*self.flow_normalizer, datapoint.climate_data[:, :, indices]), dim=2)\
+
+        hyd_data = None if not self.encode_hydro_met_data else torch.cat((datapoint.flow_data*self.flow_normalizer, datapoint.climate_data[:, :, indices]), dim=2)\
             .permute(0, 2, 1)  # i x t x b -> b x i x t
         fixed_data = None if not self.encode_attributes \
             else torch.cat((torch.tensor(np.array(datapoint.signatures)), # match with encoding_names()

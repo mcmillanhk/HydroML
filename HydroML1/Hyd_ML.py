@@ -95,38 +95,48 @@ def moving_average(a, n=451):
     return ret[n - 1:] / n
 
 
-# Output of FC1 is the encoding; output of FC2 is for pretraining to predict signatures
-class ConvNet(nn.Module):
-    @staticmethod
-    def get_activation():
-        #nn.Sigmoid()
-        return nn.ReLU()
-
+class ConvEncoder(nn.Module):
     def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties,):
-        super(ConvNet, self).__init__()
+        super(ConvEncoder, self).__init__()
+
         self.layer1 = nn.Sequential(
             nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=7, stride=2, padding=5),  # padding is (kernel_size-1)/2?
-            ConvNet.get_activation(),
+            EncoderProperties.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer2 = nn.Sequential(
             nn.Conv1d(32, 32, kernel_size=7, stride=2, padding=5),
-            ConvNet.get_activation(),
+            EncoderProperties.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer3 = nn.Sequential(
-            nn.Conv1d(32, 16, kernel_size=7, stride=2, padding=5),
-            ConvNet.get_activation(),
+            nn.Conv1d(32, self.output_dim(), kernel_size=7, stride=2, padding=5),
+            EncoderProperties.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
         self.layer4 = nn.Sequential(
             nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
 
-        cnn_output_dim = 16
+    @staticmethod
+    def output_dim():
+        return 16
+
+    def forward(self, hydro_data):
+        out = self.layer1(hydro_data)  # flow_data is b x t x i
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = self.layer4(out)
+        return out.reshape(out.size(0), -1)
+
+
+class Encoder(nn.Module):
+    def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties):
+        super(Encoder, self).__init__()
+
+        self.hydro_met_encoder = ConvEncoder if EncoderProperties.encode_hydro_met_data else None
+        cnn_output_dim = self.hydro_met_encoder.output_dim() if self.hydro_met_encoder else 0
         fixed_attribute_dim = len(encoder_properties.encoding_names(dataset_properties))
-        #len(dataset_properties.sig_normalizers)+len(dataset_properties.attrib_normalizers) \
-        #if encoder_properties.encode_attributes else 0
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
-                                 ConvNet.get_activation(), nn.Dropout(dropout_rate))
+                                 EncoderProperties.get_activation(), nn.Dropout(dropout_rate))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
                                  nn.Sigmoid()) # , nn.Dropout(dropout_rate))
 
@@ -135,19 +145,15 @@ class ConvNet(nn.Module):
         self.pretrain = True
         self.encoder_properties = encoder_properties
 
-    #Actually just add all parameters. Shouldn't do much harm
-    #def encoder_parameters(self):
-    #    return list(self.layer1.parameters()) + list(self.layer2.parameters()) + list(self.layer3.parameters()) + list(self.fc1.parameters())
-
     def forward(self, x):
         (flow_data, attribs) = x
-        out = self.layer1(flow_data)  # flow_data is b x t x i
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
-        out = out.reshape(out.size(0), -1)
-        if self.encoder_properties.encode_attributes:
-            out = torch.cat((out, attribs), axis=1) # out: b x i attribs: b x i
+        if self.encoder_properties.encode_hydro_met_data:
+            out = self.hydro_met_encoder.forward(flow_data)
+            if self.encoder_properties.encode_attributes:
+                out = torch.cat((out, attribs), axis=1) # out: b x i attribs: b x i
+        elif self.encoder_properties.encode_attributes:
+            out = attribs
+
         # out = self.drop_out(out)
         out = self.fc1(out)
         out = self.fc2(out)
@@ -376,10 +382,20 @@ def all_encoder_inputs(data_loader: DataLoader, encoder_properties: EncoderPrope
             gauge_id = datapoints.gauge_id_int[b]
             if gauge_id in encoder_inputs:
                 for i in range(2):
-                    encoder_inputs[gauge_id] = (torch.cat((encoder_inputs[gauge_id][0], hyd_data[0][b:(b+1), :]), axis=0), None if hyd_data[1] is None else torch.cat((encoder_inputs[gauge_id][1], hyd_data[1][b:(b+1), :]), axis=0))
+                    encoder_inputs[gauge_id] = (try_select_cat(b, 0, encoder_inputs, gauge_id, hyd_data),
+                                                try_select_cat(b, 1, encoder_inputs, gauge_id, hyd_data))
             else:
-                encoder_inputs[gauge_id] = (hyd_data[0][b:(b+1), :], None if hyd_data[1] is None else hyd_data[1][b:(b+1), :])
+                encoder_inputs[gauge_id] = (try_select(b, hyd_data[0]), try_select(b, hyd_data[1]))
     return encoder_inputs
+
+
+def try_select_cat(b, tuple_idx, encoder_inputs, gauge_id, hyd_data):
+    return None if hyd_data[tuple_idx] is None \
+        else torch.cat((encoder_inputs[gauge_id][tuple_idx], hyd_data[tuple_idx][b:(b + 1), :]), axis=0)
+
+
+def try_select(b, hyd_data):
+    return None if hyd_data is None else hyd_data[b:(b + 1), :]
 
 
 # Return a dictionary mapping gauge_id to a tensor of encodings
@@ -404,25 +420,29 @@ def one_encoding_per_run(datapoint: DataPoint, encoder: nn.Module, encoder_prope
                          dataset_properties: DatasetProperties, all_enc_inputs):
     encoder.train()
     first_enc_input = list(all_enc_inputs.values())[0]
-    encoder_input_dim1 = first_enc_input[0].shape[1]
-    encoder_input_dim2 = first_enc_input[0].shape[2]
+    encoder_inputs = None
     batch_size = len(datapoint.gauge_id_int)
-    hyd_data_dim = None if first_enc_input[1] is None else first_enc_input[1].shape[1]
-    encoder_inputs = torch.zeros((batch_size, encoder_input_dim1, encoder_input_dim2), dtype=torch.double)
-    hyd_data = None if hyd_data_dim is None else torch.zeros((batch_size, hyd_data_dim), dtype=torch.double)
+    encode_hyd_data = first_enc_input[0] is not None
+    if encode_hyd_data:
+        encoder_input_dim1 = first_enc_input[0].shape[1]
+        encoder_input_dim2 = first_enc_input[0].shape[2]
+        encoder_inputs = torch.zeros((batch_size, encoder_input_dim1, encoder_input_dim2), dtype=torch.double)
+    attrib_data_dim = None if first_enc_input[1] is None else first_enc_input[1].shape[1]
+    attrib_data = None if attrib_data_dim is None else torch.zeros((batch_size, attrib_data_dim), dtype=torch.double)
     idx = 0
     for gauge_id in datapoint.gauge_id_int:
-        encoding_id = np.random.randint(0, all_enc_inputs[gauge_id][0].shape[0])
-        encoder_inputs[idx, :, :] = all_enc_inputs[gauge_id][0][encoding_id, :]
-        if hyd_data_dim is not None:
-            hyd_data_id = np.random.randint(0, all_enc_inputs[gauge_id][1].shape[0])
-            hyd_data[idx, :] = all_enc_inputs[gauge_id][1][hyd_data_id, :]
+        if encode_hyd_data:
+            encoding_id = np.random.randint(0, all_enc_inputs[gauge_id][0].shape[0])
+            encoder_inputs[idx, :, :] = all_enc_inputs[gauge_id][0][encoding_id, :]
+        if attrib_data_dim is not None:
+            attrib_data_id = np.random.randint(0, all_enc_inputs[gauge_id][1].shape[0])
+            attrib_data[idx, :] = all_enc_inputs[gauge_id][1][attrib_data_id, :]
         idx = idx + 1
 
     if encoder_properties.encoder_type == EncType.LSTMEncoder:
         encoder.hidden = encoder.init_hidden()
 
-    encoding = encoder((encoder_inputs, hyd_data))
+    encoding = encoder((encoder_inputs, attrib_data))
     return encoding
 
 
@@ -444,15 +464,16 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
         encoding = encoder(input_tuple)
 
         (input_flow, input_fixed) = input_tuple
-        for col in range(input_flow.shape[1]):
-            input_flow1 = input_flow.clone()
-            input_flow1[:, col, :] += 0.1
-            encoding1 = encoder((input_flow1, input_fixed)).detach()
-            delta = encoding_diff(encoding, encoding1)
-            if col not in sums:
-                sums[col] = 0
-            sums[col] += delta
-            names[col] = "Flow" if col == 0 else encoder_properties.encoder_names[col-1]
+        if input_flow is not None:
+            for col in range(input_flow.shape[1]):
+                input_flow1 = input_flow.clone()
+                input_flow1[:, col, :] += 0.1
+                encoding1 = encoder((input_flow1, input_fixed)).detach()
+                delta = encoding_diff(encoding, encoding1)
+                if col not in sums:
+                    sums[col] = 0
+                sums[col] += delta
+                names[col] = "Flow" if col == 0 else encoder_properties.encoder_names[col-1]
 
         if input_fixed is not None:
             for col in range(input_fixed.shape[1]):
@@ -657,7 +678,7 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
                           decoder_properties: DecoderProperties, batch_size: int): #, encoder_layers, encoding_dim, hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim, hyd_data_labels):
 
     if encoder_properties.encoder_type == EncType.CNNEncoder:
-        encoder = ConvNet(dataset_properties, encoder_properties,).double()
+        encoder = Encoder(dataset_properties, encoder_properties,).double()
     elif encoder_properties.encoder_type == EncType.LSTMEncoder:
         encoder = SimpleLSTM(dataset_properties, encoder_properties,
                            batch_size=batch_size).double()
@@ -1225,13 +1246,9 @@ def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, datapoints: Data
         encoder_input = encoder_properties.select_encoder_inputs(datapoints,
                                                                  dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
 
-        hyd_data = encoder_input[0]
-        steps = hyd_data.shape[2]
-        actual_batch_size = hyd_data.shape[0]
-
         if encoder_properties.encoder_type == EncType.LSTMEncoder:
             encoder.hidden = encoder.init_hidden()
-            temp = encoder(hyd_data)  # input b x t x i. May need to be hyd_data now
+            temp = encoder(encoder_input[0])  # input b x t x i. May need to be hyd_data now
             encoding = temp[:, -1, :]  # b x o
         elif encoder_properties.encoder_type == EncType.CNNEncoder:
             #hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)
@@ -1304,7 +1321,6 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 
 def train_test_everything(subsample_data):
-    ConvNet.get_activation()
     batch_size = 128
 
     train_loader, validate_loader, test_loader, dataset_properties \
@@ -1385,4 +1401,4 @@ def do_ablation_test():
 
 torch.manual_seed(0)
 #do_ablation_test()
-train_test_everything(1)
+train_test_everything(10)
