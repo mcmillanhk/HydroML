@@ -110,8 +110,10 @@ class EncoderProperties:
         return len(self.encoder_names)+1  # +1 for flow
 
     encoding_num_layers = 2
-    encoding_hidden_dim = 20
+    encoding_hidden_dim = 32
     encode_attributes = True
+    encode_signatures = False
+    encode_hydro_met_data = False
 
     def encoding_dim(self):
         return 0 if self.encoder_type == EncType.NoEncoder else 16
@@ -134,11 +136,17 @@ class EncoderProperties:
             .permute(0, 2, 1)  # i x t x b -> b x i x t
         fixed_data = None if not self.encode_attributes \
             else torch.cat((torch.tensor(np.array(datapoint.signatures)), # match with encoding_names()
-                            torch.tensor(np.array(datapoint.attributes))), 1)
+                            torch.tensor(np.array(datapoint.attributes))), 1) if self.encode_signatures \
+            else torch.tensor(np.array(datapoint.attributes))
+
         return (hyd_data, fixed_data)
 
-    def encoding_names(dataset_properties: DatasetProperties):
-        return list(dataset_properties.sig_normalizers.keys()) + list(dataset_properties.attrib_normalizers.keys())
+    def encoding_names(self, dataset_properties: DatasetProperties):
+        attribs = list(dataset_properties.attrib_normalizers.keys())
+        if self.encode_signatures:
+            return list(dataset_properties.sig_normalizers.keys()) + attribs
+        else:
+            return attribs
 
 
 class DecoderType(Enum):
@@ -181,7 +189,7 @@ class DecoderProperties:
 
         scale_b = False
         hidden_dim = 128
-        flownet_intermediate_output_dim = 20
+        flownet_intermediate_output_dim = 32
         num_layers = 4
         flow_between_stores = False  #Allow flow between stores; otherwise they're all connected only to out flow
         decoder_include_stores = True

@@ -105,15 +105,15 @@ class ConvNet(nn.Module):
     def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties,):
         super(ConvNet, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=11, stride=2, padding=5),  # padding is (kernel_size-1)/2?
+            nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=7, stride=2, padding=5),  # padding is (kernel_size-1)/2?
             ConvNet.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer2 = nn.Sequential(
-            nn.Conv1d(32, 32, kernel_size=11, stride=2, padding=5),
+            nn.Conv1d(32, 32, kernel_size=7, stride=2, padding=5),
             ConvNet.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer3 = nn.Sequential(
-            nn.Conv1d(32, 16, kernel_size=11, stride=2, padding=5),
+            nn.Conv1d(32, 16, kernel_size=7, stride=2, padding=5),
             ConvNet.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
@@ -121,8 +121,9 @@ class ConvNet(nn.Module):
             nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
 
         cnn_output_dim = 16
-        fixed_attribute_dim = len(dataset_properties.sig_normalizers)+len(dataset_properties.attrib_normalizers) \
-            if encoder_properties.encode_attributes else 0
+        fixed_attribute_dim = len(encoder_properties.encoding_names(dataset_properties))
+        #len(dataset_properties.sig_normalizers)+len(dataset_properties.attrib_normalizers) \
+        #if encoder_properties.encode_attributes else 0
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
                                  ConvNet.get_activation(), nn.Dropout(dropout_rate))
@@ -435,7 +436,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
     encodings = {}
     sums = {}
     names = {}
-    en = EncoderProperties.encoding_names(dataset_properties)
+    en = encoder_properties.encoding_names(dataset_properties)
     for gauge_id, input_tuple in all_enc_inputs.items():
         if encoder_properties.encoder_type == EncType.LSTMEncoder:
             encoder.hidden = encoder.init_hidden().detach()
@@ -451,7 +452,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
             if col not in sums:
                 sums[col] = 0
             sums[col] += delta
-            names[col] = "Flow" if col == 0 else EncoderProperties.encoder_names[col-1]
+            names[col] = "Flow" if col == 0 else encoder_properties.encoder_names[col-1]
 
         if input_fixed is not None:
             for col in range(input_fixed.shape[1]):
@@ -912,7 +913,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
                           model_store_path, ablation_test):
     encoder.pretrain = False
 
-    coupled_learning_rate = 0.01 if ablation_test else 0.1
+    coupled_learning_rate = 0.01 if ablation_test else 0.001
     output_epochs = 800
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -1384,4 +1385,4 @@ def do_ablation_test():
 
 torch.manual_seed(0)
 #do_ablation_test()
-train_test_everything(5)
+train_test_everything(1)
