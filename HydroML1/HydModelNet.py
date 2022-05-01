@@ -2,7 +2,7 @@ import torch.nn as nn
 from Util import *
 import numpy as np
 
-
+#Decoder
 class HydModelNet(nn.Module):
 
     def __init__(self, encoding_dim, decoder_properties: DecoderProperties.HydModelNetProperties,
@@ -108,22 +108,22 @@ class HydModelNet(nn.Module):
         #rain = torch.from_numpy(datapoints.climate_data[:, idx_rain, :]/)  # rain is t x b
         rain = self.dataset_properties.get_rain(datapoints)
 
-        steps = datapoints.timesteps()
+        timesteps = datapoints.timesteps()
         batch_size = datapoints.batch_size() # rain.shape[1]
-        flows = torch.zeros([steps, batch_size]).double()
+        flows = torch.zeros([timesteps, batch_size]).double()
 
         stores = self.init_stores(batch_size)
 
-        self.inflowlog = np.zeros((steps, stores.shape[1]))
-        self.outflowlog = np.zeros((steps, self.store_outflow_dim))
-        self.storelog = np.zeros((steps, stores.shape[1]))
-        self.petlog = np.zeros((steps, 1))
+        self.inflowlog = np.zeros((timesteps, stores.shape[1]))
+        self.outflowlog = np.zeros((timesteps, self.store_outflow_dim))
+        self.storelog = np.zeros((timesteps, stores.shape[1]))
+        self.petlog = np.zeros((timesteps, 1))
 
         fixed_data = None
 
         #print_inputs('Decoder fixed_data', fixed_data)
 
-        for i in range(steps):
+        for t in range(timesteps):
             if fixed_data is None and type(encoding) != dict:
                 fixed_data = encoding if not self.decoder_properties.decoder_include_fixed \
                     else torch.cat((torch.tensor(np.array(datapoints.signatures)),
@@ -136,11 +136,11 @@ class HydModelNet(nn.Module):
                 for b in range(batch_size):
                     encoding_id = np.random.randint(0, len(encoding[datapoints.gauge_id_int[b]]))
                     fixed_data[b, :] = encoding[datapoints.gauge_id_int[b]][encoding_id, :]
-            if i == 0:
+            if t == 0:
                 stores = self.init_store_layer(fixed_data).exp()
                 # print(f"Init stores 0: {stores[0, :]}")
 
-            climate_input = datapoints.climate_data[:, i, :]
+            climate_input = datapoints.climate_data[:, t, :]
             if self.decoder_properties.decoder_include_stores:
                 log_stores = stores.clamp(min=0.1).log()
                 inputs = torch.cat((climate_input, fixed_data,
@@ -156,11 +156,11 @@ class HydModelNet(nn.Module):
             if a.min() < 0 or a.max() > 1:
                 raise Exception("Relative inflow flux outside [0,1]\n" + str(a))
 
-            self.inflowlog[i, :] = a[0, :].detach()
+            self.inflowlog[t, :] = a[0, :].detach()
 
             et = self.et_layer(outputs)
             #corrected_rain,_ = torch.max(rain[i, :] - et, 0)  # Actually the same as a relu
-            corrected_rain = nn.ReLU()(rain[:, i] - et.squeeze(1))
+            corrected_rain = nn.ReLU()(rain[:, t] - et.squeeze(1))
             #rain[i, :] = corrected_rain
             rain_distn = a * corrected_rain.unsqueeze(1)  # (b x stores) . (b x 1)
             #print('a0=' + str(a[0, :]))
@@ -174,7 +174,7 @@ class HydModelNet(nn.Module):
             else:
                 b = self.outflow_layer(outputs)
 
-            self.outflowlog[i, :] = b[0, :].detach()
+            self.outflowlog[t, :] = b[0, :].detach()
 
             if torch.max(np.isnan(b.data)) == 1:
                 raise Exception("NaN in b")
@@ -213,15 +213,15 @@ class HydModelNet(nn.Module):
             if stores.min() < 0:
                 raise Exception("Negative store\n" + str(stores))
 
-            flows[i, :] = flow_distn.sum(1)
+            flows[t, :] = flow_distn.sum(1)
 
-            if False and i == 0:
+            if False and t == 0:
                 #print(f"b_flow={b_flow[0,:]} stores={stores[0,:]}")
                 flow = datapoints.flow_data[0, :, :]
                 self.correct_init_baseflow(flow, b_flow[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE])
 
-            self.storelog[i, :] = stores[0, :].detach()
-            self.petlog[i, :] = et[0].detach()
+            self.storelog[t, :] = stores[0, :].detach()
+            self.petlog[t, :] = et[0].detach()
 
         if flows.min() < 0:
             raise Exception("Negative flow")

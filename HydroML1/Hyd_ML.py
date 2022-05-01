@@ -131,7 +131,7 @@ class Encoder(nn.Module):
     def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties):
         super(Encoder, self).__init__()
 
-        self.hydro_met_encoder = ConvEncoder if EncoderProperties.encode_hydro_met_data else None
+        self.hydro_met_encoder = ConvEncoder(dataset_properties, encoder_properties) if EncoderProperties.encode_hydro_met_data else None
         cnn_output_dim = self.hydro_met_encoder.output_dim() if self.hydro_met_encoder else 0
         fixed_attribute_dim = len(encoder_properties.encoding_names(dataset_properties))
 
@@ -960,7 +960,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
     randomize_encoding = False
-    all_enc_inputs = all_encoder_inputs(train_loader, encoder_properties, dataset_properties)
+    train_enc_inputs = all_encoder_inputs(train_loader, encoder_properties, dataset_properties)
     val_enc_inputs = all_encoder_inputs(validate_loader, encoder_properties, dataset_properties)
 
     if ablation_test:
@@ -985,12 +985,12 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     validate_loss_list = init_val_nse.copy()
     for epoch in range(output_epochs):
         if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
-            encoding_sensitivity(encoder, encoder_properties, dataset_properties, all_enc_inputs)
+            encoding_sensitivity(encoder, encoder_properties, dataset_properties, train_enc_inputs)
             if True:
                 test_encoder_decoder_nse((train_loader, validate_loader), encoder, encoder_properties, decoder,
                                          decoder_properties, dataset_properties)
 
-        train_nse = er.run_dataloader_epoch(True, all_enc_inputs, criterion, dataset_properties, decoder,
+        train_nse = er.run_dataloader_epoch(True, train_enc_inputs, criterion, dataset_properties, decoder,
                                          decoder_properties, encoder, encoder_properties, loss_list, optimizer,
                                          plot_idx, randomize_encoding, train_loader,
                                          validate_loss_list)
@@ -1106,11 +1106,11 @@ class EpochRunner:
             else:
                 all_enc = one_encoding_per_run(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
 
-            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
+            output_model_flow = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, all_enc)
 
-            flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
-            nse_err, huber_loss = compute_loss(criterion, flow, outputs)
+            gt_flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
+            nse_err, huber_loss = compute_loss(criterion, gt_flow, output_model_flow)
 
             local_loss_list.extend(nse_err.tolist())
 
@@ -1131,8 +1131,8 @@ class EpochRunner:
             # idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
             if idx in plot_idx:
                 try:
-                    plot_training(train, datapoints, dataset_properties, decoder, flow, idx,
-                                  loss_list, outputs, len(train_loader), validate_loss_list, nse_err)
+                    plot_training(train, datapoints, dataset_properties, decoder, gt_flow, idx,
+                                  loss_list, output_model_flow, len(train_loader), validate_loss_list, nse_err)
                 except Exception as e:
                     print("Plotting error " + str(e))
 
@@ -1330,7 +1330,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\90\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\99-Encode-0.001\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1346,25 +1346,12 @@ def train_test_everything(subsample_data):
 
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
 
-    #enc = ConvNet(dataset_properties, encoder_properties, ).double()
-    load_encoder = False
-    load_decoder = False
-    pretrain = False and not load_decoder
+    load_encoder = True
+    load_decoder = True
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
-        #test_encoder([train_loader], encoder, encoder_properties, dataset_properties)
     if load_decoder:
         decoder.load_state_dict(torch.load(decoder_load_path))
-
-    if False:
-        if encoder_properties.encoder_type != EncType.NoEncoder:
-            train_encoder_only(encoder, train_loader, validate_loader=validate_loader, dataset_properties=
-                               dataset_properties, encoder_properties=encoder_properties,
-                               pretrained_encoder_path=encoder_save_path, batch_size=batch_size)
-        #return
-
-    if pretrain:
-        decoder = train_decoder_only_fakedata(encoder, encoder_properties, decoder, train_loader, dataset_properties, decoder_properties, encoder_properties.encoding_dim())
 
     return train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
                                  dataset_properties, model_store_path=model_store_path, ablation_test=(subsample_data <= 0))
@@ -1401,4 +1388,4 @@ def do_ablation_test():
 
 torch.manual_seed(0)
 #do_ablation_test()
-train_test_everything(10)
+train_test_everything(1)

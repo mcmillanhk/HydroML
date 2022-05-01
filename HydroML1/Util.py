@@ -100,20 +100,19 @@ class DatasetProperties:
 
 
 class EncoderProperties:
-    encoder_type = EncType.CNNEncoder
-    encoder_names = ["prcp(mm/day)", "tmax(C)"]  # "swe(mm)",'flow(cfs)',
-    flow_normalizer = 1  # 0.1 is too low...
-    # encoder_indices = get_indices(encoder_names, hyd_data_labels)
-    # indices = list(hyd_data_labels).index()
-
     def encoder_input_dim(self):
         return len(self.encoder_names)+1  # +1 for flow
 
-    encoding_num_layers = 2
-    encoding_hidden_dim = 32
-    encode_attributes = True
-    encode_signatures = False
-    encode_hydro_met_data = False
+    def __init__(self):
+        self.encoder_type = EncType.CNNEncoder
+        self.encoder_names = ["prcp(mm/day)", "tmax(C)"]  # "swe(mm)",'flow(cfs)',
+        self.flow_normalizer = 1  # 0.1 is too low...
+
+        self.encoding_num_layers = 2
+        self.encoding_hidden_dim = 32
+        self.encode_attributes = True
+        self.encode_signatures = False
+        self.encode_hydro_met_data = True
 
     @staticmethod
     def get_activation():
