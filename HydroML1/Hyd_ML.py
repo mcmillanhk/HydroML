@@ -1,3 +1,4 @@
+import numpy as np
 from torch.utils.data import DataLoader
 import CAMELS_data as Cd
 import os
@@ -8,8 +9,10 @@ from HydModelNet import *
 from Util import *
 import random
 import shapefile as shp
+import pickle
 
 plotting_freq = 1
+batch_size = 128
 
 # Return 1-nse as we will minimize this
 def nse_loss(output, target):  # both inputs t x b
@@ -45,10 +48,8 @@ def states():
 weight_decay = 0*0.0001
 
 
-def load_inputs(subsample_data=1, batch_size=20):
-    data_root = os.path.join('D:\\', 'Hil_ML', 'Input', 'CAMELS')
+def load_inputs(subsample_data=1, batch_size=20, load_train=True, load_validate=True, load_test=False):
     data_root = os.path.join('C:\\', 'hydro', 'basin_dataset_public_v1p2')
-    load_test = False
     root_dir_flow = os.path.join(data_root, 'usgs_streamflow')
     root_dir_climate = os.path.join(data_root, 'basin_mean_forcing', 'daymet')
     root_dir_signatures = os.path.join(data_root, 'camels_attributes_v2.0')
@@ -56,33 +57,30 @@ def load_inputs(subsample_data=1, batch_size=20):
     csv_file_validate = os.path.join(root_dir_signatures, 'camels_hydro_validate.txt')
     csv_file_test = os.path.join(root_dir_signatures, 'camels_hydro_test.txt')
 
-    #sigs_as_input=True
-
     # Camels Dataset
     dataset_properties = DatasetProperties()
 
     train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, dataset_properties,
-                                     subsample_data=subsample_data, ablation_train=True) # , gauge_id='02430085'
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+                                     subsample_data=subsample_data, ablation_train=True) if load_train else None
 
-    test_dataset = None
-    if load_test:
-        test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
-                                        dataset_properties, subsample_data=subsample_data)
-    validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, root_dir_climate,
-                                        root_dir_signatures, root_dir_flow,
-                                        dataset_properties, subsample_data=subsample_data, ablation_validate=True,
-                                        gauge_id=train_loader.dataset[0].gauge_id.split('-')[0])
+    train_loader = None if train_dataset is None else DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-    # Data loader
-    validate_loader = DataLoader(dataset=validate_dataset, batch_size=batch_size,
-                                 shuffle=True, collate_fn=collate_fn)  # Shuffle so we get less spiky validation plots
+    test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
+                                    dataset_properties, subsample_data=subsample_data) if load_test else None
+
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False,
                                                                collate_fn=collate_fn)
 
-    #input_dim = 8 + len(attribs)
-    #if sigs_as_input:
-    #    input_dim = input_dim + len(train_dataset.sig_labels)
+    validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, root_dir_climate,
+                                        root_dir_signatures, root_dir_flow,
+                                        dataset_properties, subsample_data=subsample_data, ablation_validate=True,
+                                        gauge_id=train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data<=0
+                                        else None) if load_validate else None
+
+    # Data loader
+    validate_loader = None if validate_dataset is None else DataLoader(dataset=validate_dataset, batch_size=batch_size,
+                                 shuffle=True, collate_fn=collate_fn)  # Shuffle so we get less spiky validation plots
+
     if subsample_data <= 0:
         check_dataloaders(train_loader, validate_loader)
 
@@ -101,15 +99,15 @@ class ConvEncoder(nn.Module):
 
         self.layer1 = nn.Sequential(
             nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=7, stride=2, padding=5),  # padding is (kernel_size-1)/2?
-            EncoderProperties.get_activation(),
+            encoder_properties.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer2 = nn.Sequential(
             nn.Conv1d(32, 32, kernel_size=7, stride=2, padding=5),
-            EncoderProperties.get_activation(),
+            encoder_properties.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         self.layer3 = nn.Sequential(
             nn.Conv1d(32, self.output_dim(), kernel_size=7, stride=2, padding=5),
-            EncoderProperties.get_activation(),
+            encoder_properties.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
         l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
         self.layer4 = nn.Sequential(
@@ -131,12 +129,12 @@ class Encoder(nn.Module):
     def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties):
         super(Encoder, self).__init__()
 
-        self.hydro_met_encoder = ConvEncoder(dataset_properties, encoder_properties) if EncoderProperties.encode_hydro_met_data else None
+        self.hydro_met_encoder = ConvEncoder(dataset_properties, encoder_properties) if encoder_properties.encode_hydro_met_data else None
         cnn_output_dim = self.hydro_met_encoder.output_dim() if self.hydro_met_encoder else 0
         fixed_attribute_dim = len(encoder_properties.encoding_names(dataset_properties))
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
-                                 EncoderProperties.get_activation(), nn.Dropout(dropout_rate))
+                                 encoder_properties.get_activation(), nn.Dropout(dropout_rate))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
                                  nn.Sigmoid()) # , nn.Dropout(dropout_rate))
 
@@ -292,6 +290,19 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     print(f"sv: {s}")
 
+    print("Correlation between encodings and signatures")
+    print_correlations(dataset_properties, encodings, sigs)
+
+    if False:
+        C = np.matmul(encodings, vh.transpose())
+        print("Correlation between principal components of encodings and signatures")
+        print_correlations(dataset_properties, C, sigs)
+
+    #print(f"sv: {s}")
+    np.set_printoptions(precision=None, threshold=False)
+
+
+def print_correlations(dataset_properties, encodings, sigs):
     S = np.corrcoef(encodings, sigs, rowvar=False)
     if False:
         print("Correlation matrix with signatures:")
@@ -301,13 +312,9 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     for idx, signame in zip(range(num_sigs), dataset_properties.sig_normalizers.keys()):
         correlations = S[num_encodings + idx, :num_encodings]
         print_corr(correlations, signame, None)
-
     for enc_idx in range(num_encodings):
         correlations = S[enc_idx, num_encodings:]
         print_corr(correlations, f"Encoding{enc_idx}", dataset_properties.sig_normalizers)
-
-    #print(f"sv: {s}")
-    np.set_printoptions(precision=None, threshold=False)
 
 
 def colorplot_latlong(ax, encodingvec, title, lats, lons):
@@ -1025,6 +1032,10 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
+        with open(model_store_path+'encoder_properties.pkl', 'wb') as outp:
+            pickle.dump(encoder_properties, outp)
+        with open(model_store_path+'decoder_properties.pkl', 'wb') as outp:
+            pickle.dump(decoder_properties, outp)
 
     return init_val_nse, max_val_nse
 
@@ -1321,7 +1332,6 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
 
 def train_test_everything(subsample_data):
-    batch_size = 128
 
     train_loader, validate_loader, test_loader, dataset_properties \
         = load_inputs(subsample_data=subsample_data, batch_size=batch_size)
@@ -1335,26 +1345,36 @@ def train_test_everything(subsample_data):
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
-    encoder_load_path = model_load_path + 'encoder.ckpt'
-    decoder_load_path = model_load_path + 'decoder.ckpt'
-
-    encoder_save_path = model_store_path + 'encoder.ckpt'
-    decoder_save_path = model_store_path + 'decoder.ckpt'
-
-    encoder_properties = EncoderProperties()
-    decoder_properties = DecoderProperties()
-
-    encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
-
+    load_encoder_properties = True
     load_encoder = True
     load_decoder = True
+
+    decoder, decoder_properties, encoder, encoder_properties = load_network(load_decoder, load_encoder,
+                                                                            load_encoder_properties, dataset_properties,
+                                                                            model_load_path, batch_size)
+
+    return train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
+                                 dataset_properties, model_store_path=model_store_path, ablation_test=(subsample_data <= 0))
+
+
+def load_network(load_decoder, load_encoder, load_encoder_properties, dataset_properties, model_load_path, batch_size):
+    encoder_load_path = model_load_path + 'encoder.ckpt'
+    encoder_properties_load_path = model_load_path + 'encoder_properties.pkl'
+    decoder_load_path = model_load_path + 'decoder.ckpt'
+    encoder_properties = EncoderProperties()
+    if load_encoder_properties:
+        #with open(encoder_properties_load_path, 'wb') as outp:
+        #    pickle.dump(encoder_properties, outp)
+        with open(encoder_properties_load_path, 'rb') as input:
+            encoder_properties = pickle.load(input)
+
+    decoder_properties = DecoderProperties()
+    encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
     if load_decoder:
         decoder.load_state_dict(torch.load(decoder_load_path))
-
-    return train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
-                                 dataset_properties, model_store_path=model_store_path, ablation_test=(subsample_data <= 0))
+    return decoder, decoder_properties, encoder, encoder_properties
 
 
 def do_ablation_test():
@@ -1386,6 +1406,55 @@ def do_ablation_test():
         fig.show()
 
 
+class Object(object):
+    pass
+
+
+def compare_models(model_load_paths):
+    _, dataset, _, dataset_properties \
+        = load_inputs(subsample_data=1, batch_size=batch_size, load_train=False, load_validate=True, load_test=False)
+
+    models = []
+    for model_load_path, model_name in model_load_paths:
+        model = Object()
+        model.name = model_name
+        model.decoder, model.decoder_properties, model.encoder, model.encoder_properties =\
+            load_network(True, True, True, dataset_properties, model_load_path, batch_size)
+        model.encoder.pretrain = False
+        models.append(model)
+
+
+
+    er = EpochRunner()
+
+    for model in models:
+        enc_inputs = all_encoder_inputs(dataset, model.encoder_properties, dataset_properties)
+        model.decoder.weight_stores = 0.001
+
+        model.nse = er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, model.decoder,
+                                       model.decoder_properties, model.encoder, model.encoder_properties, [], None,
+                                       [], False, dataset, [])
+
+        #if model.encoder_properties.encode_hydro_met_data:
+        print(f"Encoder from {model.name}:")
+        test_encoder([dataset], model.encoder, model.encoder_properties, dataset_properties)
+
+    fig = plt.figure(figsize=(12, 3))
+    ax_boxwhisker = fig.add_subplot(1, 2, 2)
+    ax_boxwhisker.boxplot([model.nse for model in models], labels=[model.name for model in models],
+                          vert=False, whis=[5, 95], showfliers=False)
+
+    ax_boxwhisker.set_xlim(-1, 1)
+    ax_boxwhisker.set_xlabel("NSE")
+    fig.tight_layout()
+    fig.show()
+
+
+
 torch.manual_seed(0)
 #do_ablation_test()
-train_test_everything(1)
+#train_test_everything(1)
+
+compare_models([(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
+                (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
+                (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"),])

@@ -111,11 +111,11 @@ class EncoderProperties:
         self.encoding_num_layers = 2
         self.encoding_hidden_dim = 32
         self.encode_attributes = True
-        self.encode_signatures = False
-        self.encode_hydro_met_data = True
+        self.encode_signatures = True
+        self.encode_hydro_met_data = False
 
-    @staticmethod
-    def get_activation():
+
+    def get_activation(self):
         #torch.nn.Sigmoid()
         return torch.nn.ReLU()
 
