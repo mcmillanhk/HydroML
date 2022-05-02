@@ -145,8 +145,11 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         (flow_data, attribs) = x
+        hydro_met_encoding = None
         if self.encoder_properties.encode_hydro_met_data:
             out = self.hydro_met_encoder.forward(flow_data)
+            hydro_met_encoding = out.clone().detach()
+
             if self.encoder_properties.encode_attributes:
                 out = torch.cat((out, attribs), axis=1) # out: b x i attribs: b x i
         elif self.encoder_properties.encode_attributes:
@@ -157,7 +160,7 @@ class Encoder(nn.Module):
         out = self.fc2(out)
         if self.pretrain:
             out = self.fc_predict_sigs(out)
-        return out  # b x e
+        return out, hydro_met_encoding  # both b x e
 
 
 
@@ -222,7 +225,8 @@ def cat(n1, n2):
 def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_properties: EncoderProperties,
                  dataset_properties: DatasetProperties):
     encoder.eval()
-    encodings = None
+    full_encodings = None
+    hydro_encodings = None
     lats = None
     lons = None
 
@@ -241,13 +245,18 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
             if encoder_properties.encoder_type == EncType.LSTMEncoder:
                 encoder.hidden = encoder.init_hidden()
 
-            encoding = encoder(hyd_data).detach().numpy()
-            encodings = cat(encodings, encoding)
+            full_encoding_tensor, hydro_encoding_tensor = encoder(hyd_data)
+            full_encoding = full_encoding_tensor.detach().numpy()
+            hydro_encoding = hydro_encoding_tensor.numpy() if hydro_encoding_tensor is not None else None
 
-            for b in range(encoding.shape[0]):
-                for i in range(encoding.shape[1]):
-                    if encoding[b, i] > max_vals[i]:
-                        max_vals[i] = encoding[b, i]
+            full_encodings = cat(full_encodings, full_encoding)
+            if hydro_encoding is not None:
+                hydro_encodings = cat(hydro_encodings, hydro_encoding)
+
+            for b in range(full_encoding.shape[0]):
+                for i in range(full_encoding.shape[1]):
+                    if full_encoding[b, i] > max_vals[i]:
+                        max_vals[i] = full_encoding[b, i]
                         max_gauge[i] = datapoints.gauge_id[b]
 
             lats, lons = cat_lat_lons(datapoints, lats, lons)
@@ -261,60 +270,86 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     print (f"max_vals={max_vals}")
     print (f"max_gauge={max_gauge}")
 
-    cols = int(np.sqrt(encodings.shape[1]))
-    rows = int(np.ceil(encodings.shape[1]/cols))
-    scale = 2.5
-    fig = plt.figure(figsize=(scale*rows, scale*cols))
+    for encodings, label in [(full_encodings, "Full encodings"), (hydro_encodings, "Hydro-met encodings")]:
+        if encodings is None:
+            continue
 
-    for i in range(encodings.shape[1]):
-        ax = fig.add_subplot(cols, rows, i+1)
+        cols = int(np.sqrt(encodings.shape[1]))
+        rows = int(np.ceil(encodings.shape[1]/cols))
+        scale = 2.5
+        fig = plt.figure(figsize=(scale*rows, scale*cols))
 
-        plot_states(ax, sf)
+        for i in range(encodings.shape[1]):
+            ax = fig.add_subplot(cols, rows, i+1)
 
-        encodingvec = encodings[:, i]
-        colorplot_latlong(ax, encodingvec, f'Encoding {i}', lats, lons)
+            plot_states(ax, sf)
 
-    plt.show()
+            encodingvec = encodings[:, i]
+            colorplot_latlong(ax, encodingvec, f'{label} {i}', lats, lons)
 
-    M = np.corrcoef(encodings, rowvar=False)
-    np.set_printoptions(precision=3, threshold=1000, linewidth=250)
-    if False:
-        print("Correlation matrix:")
-        print(M)
+        plt.show()
 
-    try:
-        u, s, vh = np.linalg.svd(M)
-    except np.linalg.LinAlgError:
-        print ("SVD failed: numpy.linalg.LinAlgError")
-        return
+        M = np.corrcoef(encodings, rowvar=False)
+        np.set_printoptions(precision=3, threshold=1000, linewidth=250)
+        if False:
+            print("Correlation matrix:")
+            print(M)
 
-    print(f"sv: {s}")
+        try:
+            u, s, vh = np.linalg.svd(M)
+        except np.linalg.LinAlgError:
+            print ("SVD failed: numpy.linalg.LinAlgError")
+            return
 
-    print("Correlation between encodings and signatures")
-    print_correlations(dataset_properties, encodings, sigs)
+        print(f"sv: {s}")
 
-    if False:
-        C = np.matmul(encodings, vh.transpose())
-        print("Correlation between principal components of encodings and signatures")
-        print_correlations(dataset_properties, C, sigs)
+        print(f"Correlation between {label} and signatures")
+        print_correlations(label, dataset_properties, encodings, sigs)
+
+        if True:
+            C = np.matmul(encodings, vh.transpose())
+            print(f"Correlation between principal components of {label} and signatures")
+            print_correlations(label + " (PC)", dataset_properties, C, sigs)
 
     #print(f"sv: {s}")
     np.set_printoptions(precision=None, threshold=False)
 
 
-def print_correlations(dataset_properties, encodings, sigs):
+def print_correlations(label, dataset_properties, encodings, sigs):
     S = np.corrcoef(encodings, sigs, rowvar=False)
     if False:
         print("Correlation matrix with signatures:")
         print(S)
     num_encodings = encodings.shape[1]
-    num_sigs = len(dataset_properties.sig_normalizers.keys())
-    for idx, signame in zip(range(num_sigs), dataset_properties.sig_normalizers.keys()):
+    sig_names = dataset_properties.sig_normalizers.keys()
+    num_sigs = len(sig_names)
+    for idx, signame in zip(range(num_sigs), sig_names):
         correlations = S[num_encodings + idx, :num_encodings]
         print_corr(correlations, signame, None)
     for enc_idx in range(num_encodings):
         correlations = S[enc_idx, num_encodings:]
-        print_corr(correlations, f"Encoding{enc_idx}", dataset_properties.sig_normalizers)
+        print_corr(correlations, f"{label}{enc_idx}", dataset_properties.sig_normalizers)
+
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.abs(S[num_encodings:,:num_encodings]))
+
+    # Show all ticks and label them with the respective list entries
+    ax.set_yticks(np.arange(num_sigs), labels=sig_names)
+    ax.set_xticks(np.arange(num_encodings), labels=[f"{label}{enc_idx}" for enc_idx in range(num_encodings)])
+
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+             rotation_mode="anchor")
+
+    # Loop over data dimensions and create text annotations.
+    #for i in range(len(vegetables)):
+    #    for j in range(len(farmers)):
+    #        text = ax.text(j, i, harvest[i, j],
+    #                       ha="center", va="center", color="w")
+
+    ax.set_title(f"Correlation between CAMELS signatures and {label}")
+    fig.tight_layout()
+    plt.show()
 
 
 def colorplot_latlong(ax, encodingvec, title, lats, lons):
@@ -414,7 +449,7 @@ def all_encodings(datapoint: DataPoint, encoder: nn.Module, encoder_properties: 
         if encoder_properties.encoder_type == EncType.LSTMEncoder:
             encoder.hidden = encoder.init_hidden()
 
-        encoding = encoder(all_enc_inputs[gauge_id])
+        encoding, _ = encoder(all_enc_inputs[gauge_id])
         if gauge_id in encodings:
             encodings[gauge_id] = torch.cat((encodings[gauge_id], encoding), axis=0)
         else:
@@ -449,7 +484,7 @@ def one_encoding_per_run(datapoint: DataPoint, encoder: nn.Module, encoder_prope
     if encoder_properties.encoder_type == EncType.LSTMEncoder:
         encoder.hidden = encoder.init_hidden()
 
-    encoding = encoder((encoder_inputs, attrib_data))
+    encoding, _ = encoder((encoder_inputs, attrib_data))
     return encoding
 
 
@@ -468,14 +503,14 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
         if encoder_properties.encoder_type == EncType.LSTMEncoder:
             encoder.hidden = encoder.init_hidden().detach()
 
-        encoding = encoder(input_tuple)
+        encoding, _ = encoder(input_tuple)
 
         (input_flow, input_fixed) = input_tuple
         if input_flow is not None:
             for col in range(input_flow.shape[1]):
                 input_flow1 = input_flow.clone()
                 input_flow1[:, col, :] += 0.1
-                encoding1 = encoder((input_flow1, input_fixed)).detach()
+                encoding1, _ = encoder((input_flow1, input_fixed)).detach()
                 delta = encoding_diff(encoding, encoding1)
                 if col not in sums:
                     sums[col] = 0
@@ -486,7 +521,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
             for col in range(input_fixed.shape[1]):
                 input_fixed1 = input_fixed.clone()
                 input_fixed1[:, col] += 0.1
-                encoding1 = encoder((input_flow, input_fixed1)).detach()
+                encoding1, _ = encoder((input_flow, input_fixed1)).detach()
                 delta = encoding_diff(encoding, encoding1)
                 key = col + 10
                 if key not in sums:
@@ -543,7 +578,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
 
             #flow = hyd_data[:, :, :]
             #outputs = model(flow)
-            outputs = encoder(hyd_data)
+            outputs, _ = encoder(hyd_data)
             if torch.max(np.isnan(outputs.data)) == 1:
                 raise Exception('nan generated')
             signatures_ref = datapoints.signatures_tensor()  # np.squeeze(signatures)  # signatures is b x s x ?
@@ -625,7 +660,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
             rel_error = None
             for idx, datapoints in enumerate(validate_loader):  #TODO we need to enumerate and batch the correct datapoints
                 hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
-                outputs = encoder(hyd_data)
+                outputs, _ = encoder(hyd_data)
                 signatures_ref = datapoints.signatures_tensor()
                 error = criterion(outputs, signatures_ref).item()
                 error_bl = criterion(0*outputs, signatures_ref).item()  # relative to predicting 0 for everything
@@ -749,7 +784,7 @@ def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNe
 
         #fake_encoding = np.random.uniform(-1, 1, [1, encoding_dim, batch_size])
         encoder_input = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)
-        fake_encoding = np.expand_dims(np.transpose(encoder(encoder_input).detach().numpy()), 0)
+        fake_encoding = np.expand_dims(np.transpose(encoder(encoder_input)[0].detach().numpy()), 0)
         fake_stores = np.random.uniform(0, 1, [1, store_size, batch_size])
 
         decoder_input: torch.Tensor = decoder_properties.hyd_model_net_props.select_input(datapoints,
@@ -1259,12 +1294,12 @@ def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, datapoints: Data
 
         if encoder_properties.encoder_type == EncType.LSTMEncoder:
             encoder.hidden = encoder.init_hidden()
-            temp = encoder(encoder_input[0])  # input b x t x i. May need to be hyd_data now
+            temp, _ = encoder(encoder_input[0])  # input b x t x i. May need to be hyd_data now
             encoding = temp[:, -1, :]  # b x o
         elif encoder_properties.encoder_type == EncType.CNNEncoder:
             #hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)
             encoder.pretrain = False
-            encoding = encoder(encoder_input)  # input b x t x i
+            encoding, _ = encoder(encoder_input)  # input b x t x i
 
         outputs = decoder((datapoints, encoding))  # b x t [expect
     else:
