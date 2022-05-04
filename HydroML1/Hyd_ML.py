@@ -4,6 +4,7 @@ import CAMELS_data as Cd
 import os
 import math
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import time
 from HydModelNet import *
 from Util import *
@@ -285,7 +286,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
             plot_states(ax, sf)
 
             encodingvec = encodings[:, i]
-            colorplot_latlong(ax, encodingvec, f'{label} {i}', lats, lons)
+            colorplot_latlong(ax, encodingvec, f'{label} {i}', lats, lons, False)
 
         plt.show()
 
@@ -351,11 +352,21 @@ def print_correlations(label, dataset_properties, encodings, sigs):
     fig.tight_layout()
     plt.show()
 
-
-def colorplot_latlong(ax, encodingvec, title, lats, lons):
+import matplotlib.cm as cm
+def colorplot_latlong(ax, encodingvec, title, lats, lons, add_legend):
     encodingveccols = (encodingvec - encodingvec.min()) / max((encodingvec.max() - encodingvec.min()), 1e-8)
-    ax.scatter(lons, lats, c=encodingveccols, s=7, cmap='viridis')
-    ax.set_title(title)
+    cmap = 'viridis'
+    ax.scatter(lons, lats, c=encodingveccols, s=7, cmap=cmap)
+    ax.set_title(title, fontsize=10)
+    if add_legend:
+        # setup the colorbar
+        #ax.tight_layout()
+        scalarmap = cm.ScalarMappable(norm=mpl.colors.Normalize(), cmap=cmap, fontsize=8)
+        scalarmap.set_array(encodingvec)
+        plt.colorbar(scalarmap)
+        ax.set_xlabel("Long.", fontsize=8)
+        ax.set_ylabel("Lat.", fontsize=8)
+
 
 
 def plot_states(ax, sf):
@@ -372,31 +383,51 @@ def cat_lat_lons(datapoints, lats, lons):
     lons = cat(lons, datapoints.latlong['gauge_lon'].to_numpy())
     return lats, lons
 
+class Object(object):
+    pass
 
-def test_encoder_decoder_nse(data_loaders: List[DataLoader], encoder: nn.Module, encoder_properties: EncoderProperties,
-                 decoder: nn.Module, decoder_properties: DecoderProperties, dataset_properties: DatasetProperties):
-    encoder.eval()
-    decoder.eval()
+def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object], dataset_properties: DatasetProperties):
+    for model in models:
+        model.encoder.eval()
+        model.decoder.eval()
 
-    lats = None
-    lons = None
-
-    nse_err = None
+    results = {}
+    for model in models:
+        results[model.name] = Object()
+        res = results[model.name]
+        res.nse_err = None
+        res.lats = None
+        res.lons = None
 
     for data_loader in data_loaders:
         for idx, datapoints in enumerate(data_loader):
-            hyd_data = encoder_properties.select_encoder_inputs(
-                datapoints, dataset_properties)  # t x i x b
-            outputs = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties, dataset_properties, None)
-            flow = datapoints.flow_data.squeeze(2).transpose(0,1)  # t x b
-            loss, _ = nse_loss(outputs, flow) # both inputs should be t x b
-            nse_err = cat(nse_err, loss)
-            lats, lons = cat_lat_lons(datapoints, lats, lons)
+            for model in models:
+                res = results[model.name]
+                hyd_data = model.encoder_properties.select_encoder_inputs(
+                    datapoints, dataset_properties)  # t x i x b
+                outputs = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties, model.decoder_properties, dataset_properties, None)
+                flow = datapoints.flow_data.squeeze(2).transpose(0,1)  # t x b
+                loss, _ = nse_loss(outputs, flow) # both inputs should be t x b
+                res.nse_err = cat(res.nse_err, loss)
+                res.lats, res.lons = cat_lat_lons(datapoints, res.lats, res.lons)
 
-    fig = plt.figure(figsize=(4,4))
-    ax = fig.add_subplot(1,1,1)
+    for model in models:
+        res = results[model.name]
+        plot_nse_map(f"{model.name} NSE", res.lats, res.lons, res.nse_err)
+
+    for model1 in models:
+        for model2 in models:
+            if model1.name != model2.name:
+                title = f"Difference in NSE {model1.name}-{model2.name}"
+                res1 = results[model1.name]
+                res2 = results[model2.name]
+                plot_nse_map(title, res1.lats, res1.lons, res1.nse_err-res2.nse_err)
+
+def plot_nse_map(title, lats, lons, nse_err):
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(1, 1, 1)
     plot_states(ax, states())
-    colorplot_latlong(ax, nse_err, f'NSE, range {nse_err.min():.3f}-{nse_err.max():.3f}', lats, lons)
+    colorplot_latlong(ax, nse_err, f'{title}\nRange {nse_err.min():.3f} to {nse_err.max():.3f}', lats, lons, True)
     plt.show()
 
 
@@ -1029,8 +1060,13 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
             encoding_sensitivity(encoder, encoder_properties, dataset_properties, train_enc_inputs)
             if True:
-                test_encoder_decoder_nse((train_loader, validate_loader), encoder, encoder_properties, decoder,
-                                         decoder_properties, dataset_properties)
+                model = Object()
+                model.name = "ModelName"
+                model.decoder = decoder
+                model.decoder_properties = decoder_properties
+                model.encoder = encoder
+                model.encoder_properties = encoder_properties
+                test_encoder_decoder_nse((train_loader, validate_loader), [model], dataset_properties)
 
         train_nse = er.run_dataloader_epoch(True, train_enc_inputs, criterion, dataset_properties, decoder,
                                          decoder_properties, encoder, encoder_properties, loss_list, optimizer,
@@ -1441,13 +1477,9 @@ def do_ablation_test():
         fig.show()
 
 
-class Object(object):
-    pass
-
-
 def compare_models(model_load_paths):
-    _, dataset, _, dataset_properties \
-        = load_inputs(subsample_data=1, batch_size=batch_size, load_train=False, load_validate=True, load_test=False)
+    dataset_train, dataset_val, _, dataset_properties \
+        = load_inputs(subsample_data=1, batch_size=batch_size, load_train=True, load_validate=True, load_test=False)
 
     models = []
     for model_load_path, model_name in model_load_paths:
@@ -1456,23 +1488,23 @@ def compare_models(model_load_paths):
         model.decoder, model.decoder_properties, model.encoder, model.encoder_properties =\
             load_network(True, True, True, dataset_properties, model_load_path, batch_size)
         model.encoder.pretrain = False
+        model.decoder.weight_stores = 0.001
         models.append(model)
 
-
+    test_encoder_decoder_nse([dataset_train, dataset_val], models, dataset_properties)
 
     er = EpochRunner()
 
     for model in models:
-        enc_inputs = all_encoder_inputs(dataset, model.encoder_properties, dataset_properties)
-        model.decoder.weight_stores = 0.001
+        enc_inputs = all_encoder_inputs(dataset_train, model.encoder_properties, dataset_properties)
 
         model.nse = er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, model.decoder,
                                        model.decoder_properties, model.encoder, model.encoder_properties, [], None,
-                                       [], False, dataset, [])
+                                       [], False, dataset_val, [])
 
         #if model.encoder_properties.encode_hydro_met_data:
         print(f"Encoder from {model.name}:")
-        test_encoder([dataset], model.encoder, model.encoder_properties, dataset_properties)
+        test_encoder([dataset_train, dataset_val], model.encoder, model.encoder_properties, dataset_properties)
 
     fig = plt.figure(figsize=(12, 3))
     ax_boxwhisker = fig.add_subplot(1, 2, 2)
