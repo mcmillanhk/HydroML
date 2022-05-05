@@ -131,7 +131,8 @@ class HydModelNet(nn.Module):
             if type(encoding) == dict:
                 if self.decoder_properties.decoder_include_fixed:
                     raise Exception("TODO append this")
-                encoding_dim = len(encoding[datapoints.gauge_id_int[0]][0])
+                first_encoding = encoding[datapoints.gauge_id_int[0]][0]
+                encoding_dim = len(first_encoding)
                 fixed_data = torch.zeros([batch_size, encoding_dim])
                 for b in range(batch_size):
                     encoding_id = np.random.randint(0, len(encoding[datapoints.gauge_id_int[b]]))

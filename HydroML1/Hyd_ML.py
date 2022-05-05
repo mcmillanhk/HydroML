@@ -332,7 +332,8 @@ def print_correlations(label, dataset_properties, encodings, sigs):
         print_corr(correlations, f"{label}{enc_idx}", dataset_properties.sig_normalizers)
 
     fig, ax = plt.subplots()
-    im = ax.imshow(np.abs(S[num_encodings:,:num_encodings]))
+    S_slice = S[num_encodings:, :num_encodings] # s x e
+    im = ax.imshow(np.abs(S_slice))
 
     # Show all ticks and label them with the respective list entries
     ax.set_yticks(np.arange(num_sigs), labels=sig_names)
@@ -343,10 +344,10 @@ def print_correlations(label, dataset_properties, encodings, sigs):
              rotation_mode="anchor")
 
     # Loop over data dimensions and create text annotations.
-    #for i in range(len(vegetables)):
-    #    for j in range(len(farmers)):
-    #        text = ax.text(j, i, harvest[i, j],
-    #                       ha="center", va="center", color="w")
+    for i in range(num_encodings):
+        for j in range(num_sigs):
+            text = ax.text(i, j, f"{S_slice[j, i]:.2f}",
+                           ha="center", va="center", color="w", fontsize="7")
 
     ax.set_title(f"Correlation between CAMELS signatures and {label}")
     fig.tight_layout()
@@ -361,7 +362,7 @@ def colorplot_latlong(ax, encodingvec, title, lats, lons, add_legend):
     if add_legend:
         # setup the colorbar
         #ax.tight_layout()
-        scalarmap = cm.ScalarMappable(norm=mpl.colors.Normalize(), cmap=cmap, fontsize=8)
+        scalarmap = cm.ScalarMappable(norm=mpl.colors.Normalize(), cmap=cmap)
         scalarmap.set_array(encodingvec)
         plt.colorbar(scalarmap)
         ax.set_xlabel("Long.", fontsize=8)
@@ -390,6 +391,9 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
     for model in models:
         model.encoder.eval()
         model.decoder.eval()
+        print(f"{model.decoder.weight_stores=}")
+        print(f"{model.encoder.pretrain=}")
+
 
     results = {}
     for model in models:
@@ -399,15 +403,25 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
         res.lats = None
         res.lons = None
 
+
     for data_loader in data_loaders:
+        for model in models:
+            results[model.name].enc_inputs = all_encoder_inputs(data_loader, model.encoder_properties, dataset_properties)
         for idx, datapoints in enumerate(data_loader):
             for model in models:
                 res = results[model.name]
-                hyd_data = model.encoder_properties.select_encoder_inputs(
-                    datapoints, dataset_properties)  # t x i x b
-                outputs = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties, model.decoder_properties, dataset_properties, None)
-                flow = datapoints.flow_data.squeeze(2).transpose(0,1)  # t x b
-                loss, _ = nse_loss(outputs, flow) # both inputs should be t x b
+
+                #hyd_data = model.encoder_properties.select_encoder_inputs(
+                #    datapoints, dataset_properties)  # t x i x b
+                #
+                all_enc = one_encoding_per_run(datapoints, model.encoder, model.encoder_properties, dataset_properties,
+                                               res.enc_inputs)
+
+                outputs = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
+                                              model.decoder_properties, dataset_properties, all_enc)
+                flow = datapoints.flow_data  #.squeeze(2).transpose(0,1)  # t x b
+                #loss, _ = nse_loss(outputs, flow) # both inputs should be t x b
+                loss, _ = compute_loss(nse_loss, flow, outputs)
                 res.nse_err = cat(res.nse_err, loss)
                 res.lats, res.lons = cat_lat_lons(datapoints, res.lats, res.lons)
 
@@ -1478,8 +1492,10 @@ def do_ablation_test():
 
 
 def compare_models(model_load_paths):
-    dataset_train, dataset_val, _, dataset_properties \
-        = load_inputs(subsample_data=1, batch_size=batch_size, load_train=True, load_validate=True, load_test=False)
+    dataset_train, dataset_val, dataset_test, dataset_properties \
+        = load_inputs(subsample_data=1, batch_size=batch_size, load_train=True, load_validate=True, load_test=True)
+
+    test = dataset_test
 
     models = []
     for model_load_path, model_name in model_load_paths:
@@ -1491,20 +1507,22 @@ def compare_models(model_load_paths):
         model.decoder.weight_stores = 0.001
         models.append(model)
 
-    test_encoder_decoder_nse([dataset_train, dataset_val], models, dataset_properties)
+    test_encoder_decoder_nse([dataset_train, dataset_val, dataset_test], models, dataset_properties)
 
     er = EpochRunner()
 
     for model in models:
-        enc_inputs = all_encoder_inputs(dataset_train, model.encoder_properties, dataset_properties)
+        enc_inputs = all_encoder_inputs(test, model.encoder_properties, dataset_properties)
 
         model.nse = er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, model.decoder,
                                        model.decoder_properties, model.encoder, model.encoder_properties, [], None,
-                                       [], False, dataset_val, [])
+                                       [], False, test, [])
+
+        print(f"Median NSE {model.name}: {np.median(model.nse)} mean {np.mean(model.nse)}")
 
         #if model.encoder_properties.encode_hydro_met_data:
         print(f"Encoder from {model.name}:")
-        test_encoder([dataset_train, dataset_val], model.encoder, model.encoder_properties, dataset_properties)
+        test_encoder([dataset_train, dataset_val, dataset_test], model.encoder, model.encoder_properties, dataset_properties)
 
     fig = plt.figure(figsize=(12, 3))
     ax_boxwhisker = fig.add_subplot(1, 2, 2)
@@ -1521,6 +1539,7 @@ def compare_models(model_load_paths):
 torch.manual_seed(0)
 #do_ablation_test()
 #train_test_everything(1)
+#compare_models([(r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures")])
 
 compare_models([(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
                 (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
