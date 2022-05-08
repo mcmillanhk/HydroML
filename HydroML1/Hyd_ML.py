@@ -15,6 +15,12 @@ import pickle
 plotting_freq = 1
 batch_size = 128
 
+def savefig(name, plt):
+    fig_output = r"c:\\hydro\\figs3\\"
+    if not os.path.exists(fig_output):
+        os.mkdir(fig_output)
+    plt.savefig(fig_output + name + '.png')
+
 # Return 1-nse as we will minimize this
 def nse_loss(output, target):  # both inputs t x b
     num = torch.sum((output - target)**2, dim=[0])
@@ -69,7 +75,7 @@ def load_inputs(subsample_data=1, batch_size=20, load_train=True, load_validate=
     test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
                                     dataset_properties, subsample_data=subsample_data) if load_test else None
 
-    test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=1, shuffle=False,
+    test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False,
                                                                collate_fn=collate_fn)
 
     validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, root_dir_climate,
@@ -278,7 +284,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         cols = int(np.sqrt(encodings.shape[1]))
         rows = int(np.ceil(encodings.shape[1]/cols))
         scale = 2.5
-        fig = plt.figure(figsize=(scale*rows, scale*cols))
+        fig = plt.figure(figsize=((scale*1.2)*rows, scale*cols))
 
         for i in range(encodings.shape[1]):
             ax = fig.add_subplot(cols, rows, i+1)
@@ -286,8 +292,9 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
             plot_states(ax, sf)
 
             encodingvec = encodings[:, i]
-            colorplot_latlong(ax, encodingvec, f'{label} {i}', lats, lons, False)
+            colorplot_latlong(ax, encodingvec, f'{label} {i}', lats, lons, False, 5)
 
+        savefig(label, plt)
         plt.show()
 
         M = np.corrcoef(encodings, rowvar=False)
@@ -349,15 +356,17 @@ def print_correlations(label, dataset_properties, encodings, sigs):
             text = ax.text(i, j, f"{S_slice[j, i]:.2f}",
                            ha="center", va="center", color="w", fontsize="7")
 
-    ax.set_title(f"Correlation between CAMELS signatures and {label}")
+    title = f"Correlation between CAMELS signatures and {label}"
+    ax.set_title(title)
     fig.tight_layout()
+    savefig(title, plt)
     plt.show()
 
 import matplotlib.cm as cm
-def colorplot_latlong(ax, encodingvec, title, lats, lons, add_legend):
+def colorplot_latlong(ax, encodingvec, title, lats, lons, add_legend, size=7):
     encodingveccols = (encodingvec - encodingvec.min()) / max((encodingvec.max() - encodingvec.min()), 1e-8)
     cmap = 'viridis'
-    ax.scatter(lons, lats, c=encodingveccols, s=7, cmap=cmap)
+    ax.scatter(lons, lats, c=encodingveccols, s=size, cmap=cmap)
     ax.set_title(title, fontsize=10)
     if add_legend:
         # setup the colorbar
@@ -374,8 +383,21 @@ def plot_states(ax, sf):
     for stateshape in sf.shapeRecords():
         if stateshape.record.STUSPS in {'AK', 'PR', 'HI', 'GU', 'MP', 'VI', 'AS'}:
             continue
-        x = [a[0] for a in stateshape.shape.points[:]]
-        y = [a[1] for a in stateshape.shape.points[:]]
+
+
+        # Only draw the longest part
+        num_parts = len(stateshape.shape.parts)
+        longest_part_len = 0
+        for i in range(num_parts):
+            part_end_idx = stateshape.shape.parts[i+1] if i+1 < num_parts else len(stateshape.shape.points)
+            part_length = part_end_idx - stateshape.shape.parts[i]
+            if part_length > longest_part_len:
+                longest_part_start = stateshape.shape.parts[i]
+                longest_part_len = part_length
+                longest_part_end = part_end_idx
+
+        x = [a[0] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
+        y = [a[1] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
         ax.plot(x, y, 'k')
 
 
@@ -438,10 +460,11 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 plot_nse_map(title, res1.lats, res1.lons, res1.nse_err-res2.nse_err)
 
 def plot_nse_map(title, lats, lons, nse_err):
-    fig = plt.figure(figsize=(4, 4))
+    fig = plt.figure(figsize=(6, 4))
     ax = fig.add_subplot(1, 1, 1)
     plot_states(ax, states())
     colorplot_latlong(ax, nse_err, f'{title}\nRange {nse_err.min():.3f} to {nse_err.max():.3f}', lats, lons, True)
+    savefig(title, plt)
     plt.show()
 
 
@@ -1494,8 +1517,11 @@ def do_ablation_test():
 def compare_models(model_load_paths):
     dataset_train, dataset_val, dataset_test, dataset_properties \
         = load_inputs(subsample_data=1, batch_size=batch_size, load_train=True, load_validate=True, load_test=True)
+    datasets = [dataset_train, dataset_val]
+    if dataset_test:
+        datasets = datasets + [dataset_test]
+    test = dataset_test if dataset_test else dataset_val
 
-    test = dataset_test
 
     models = []
     for model_load_path, model_name in model_load_paths:
@@ -1507,7 +1533,7 @@ def compare_models(model_load_paths):
         model.decoder.weight_stores = 0.001
         models.append(model)
 
-    test_encoder_decoder_nse([dataset_train, dataset_val, dataset_test], models, dataset_properties)
+    test_encoder_decoder_nse(datasets, models, dataset_properties)
 
     er = EpochRunner()
 
@@ -1522,7 +1548,7 @@ def compare_models(model_load_paths):
 
         #if model.encoder_properties.encode_hydro_met_data:
         print(f"Encoder from {model.name}:")
-        test_encoder([dataset_train, dataset_val, dataset_test], model.encoder, model.encoder_properties, dataset_properties)
+        test_encoder(datasets, model.encoder, model.encoder_properties, dataset_properties)
 
     fig = plt.figure(figsize=(12, 3))
     ax_boxwhisker = fig.add_subplot(1, 2, 2)
@@ -1532,6 +1558,7 @@ def compare_models(model_load_paths):
     ax_boxwhisker.set_xlim(-1, 1)
     ax_boxwhisker.set_xlabel("NSE")
     fig.tight_layout()
+    savefig('Comparison-boxplot', plt)
     fig.show()
 
 
