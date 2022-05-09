@@ -162,62 +162,39 @@ class DecoderType(Enum):
 # Properties common to all decoders.
 class DecoderProperties:
 
-    decoder_model_type = DecoderType.HydModel
+    def __init__(self):
+        self.decoder_model_type = DecoderType.HydModel
 
     #Properties specific to HydModelNet
     class HydModelNetProperties:
-        class Indices:
-            STORE_DIM = 8  # 4 is probably the minimum: snow, deep, shallow, runoff
-            SLOW_STORE = 0
-            SLOW_STORE2 = 1 # a bit faster
-            SURFACE_STORE = 2
-            SNOW_STORE = STORE_DIM-1
-
         def __init__(self):
-            #store_weights normalize stores when used as input [UNUSED--log them instead]
-            self.store_weights = torch.ones((1, self.Indices.STORE_DIM))*0.001
-            self.store_weights[0, self.Indices.SURFACE_STORE]=0.1
-            self.store_weights[0, self.Indices.SNOW_STORE]=0.01
-
-            # If scale_b then outflow_weights weight output from b so that we're predicting numbers with similar
-            # magnitude for all pathways (first STORE_DIM^2 are between stores (if flow_between_stores), then STORE_DIM
-            # are loss, then the final STORE_DIM are the store outputs
-            self.outflow_weights = torch.ones((1, self.b_length()))*0.01
-
-            store_outflow_weights = torch.ones((self.Indices.STORE_DIM))
-            store_outflow_weights[self.Indices.SLOW_STORE]=0.01
-            store_outflow_weights[self.Indices.SLOW_STORE2] = 0.05
-            store_outflow_weights[self.Indices.SNOW_STORE] = 0.2
-            store_outflow_weights[self.Indices.SURFACE_STORE] = 1
-
-            self.outflow_weights[0, -self.Indices.STORE_DIM:] = store_outflow_weights
-
-        scale_b = False
-        hidden_dim = 128
-        flownet_intermediate_output_dim = 32
-        num_layers = 4
-        flow_between_stores = False  #Allow flow between stores; otherwise they're all connected only to out flow
-        decoder_include_stores = True
-        decoder_include_fixed = False
+            self.scale_b = False
+            self.hidden_dim = 128
+            self.flownet_intermediate_output_dim = 32
+            self.num_layers = 4
+            self.flow_between_stores = False  # Allow flow between stores; otherwise they're all connected only to out flow
+            self.decoder_include_stores = True
+            self.decoder_include_fixed = False
+            self.store_dim = 8
 
         def b_length(self):
-            return self.Indices.STORE_DIM * (self.Indices.STORE_DIM + 2) if self.flow_between_stores \
-                else self.Indices.STORE_DIM
+            return self.store_dim * (self.store_dim + 2) if self.flow_between_stores \
+                else self.store_dim
 
         def store_idx_start(self):
-            return self.b_length()-self.Indices.STORE_DIM
+            return self.b_length()-self.store_dim
 
         def input_dim2(self, dataset_properties: DatasetProperties, encoding_dim: int):
             total_dim = len(dataset_properties.climate_norm) + encoding_dim
             if self.decoder_include_fixed:
                 total_dim += len(dataset_properties.sig_normalizers) + len(dataset_properties.attrib_normalizers)
             if self.decoder_include_stores:
-                total_dim += self.Indices.STORE_DIM
+                total_dim += self.store_dim
             return total_dim
 
         def select_input(self, datapoints: DataPoint, encoding, stores, dataset_properties: DatasetProperties):
-            batchsize=datapoints.climate_data.shape[0]
-            timesteps=datapoints.climate_data.shape[1]
+            batch_size=datapoints.climate_data.shape[0]
+            time_steps=datapoints.climate_data.shape[1]
             decoder_input_dim = self.input_dim2(dataset_properties, encoding.shape[1])
             num_climate_attribs = datapoints.climate_data.shape[2]
 
@@ -232,7 +209,7 @@ class DecoderProperties:
             encoding_start_idx = attrib_start_idx+num_attributes
             store_start_idx = encoding_start_idx+encoding_dim
 
-            decoder_input = torch.empty(timesteps, decoder_input_dim, batchsize, dtype=torch.double).fill_(np.nan)
+            decoder_input = torch.empty(time_steps, decoder_input_dim, batch_size, dtype=torch.double).fill_(np.nan)
             decoder_input[:, climate_start_idx:sig_start_idx, :] = datapoints.climate_data.permute(1, 2, 0)
 
             if self.decoder_include_fixed:

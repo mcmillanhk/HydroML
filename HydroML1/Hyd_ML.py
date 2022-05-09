@@ -819,15 +819,6 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
     return encoder, decoder
 
 
-#def train_decoder_only_fakedata(decoder: HydModelNet, input_size, store_size, batch_size, index_temp_minmax,
-#                                weight_temp, decoder_indices):
-#    decoder = train_decoder_only_fakedata(decoder, input_size, store_size, batch_size,
-#                                          index_temp_minmax, weight_temp)
-#    #decoder = train_decoder_only_fakedata_outputs(decoder, input_size, store_size, batch_size,
-#    #                                              index_temp_minmax, weight_temp)
-#    return decoder
-
-
 #input_size, store_size, batch_size, index_temp_minmax, weight_temp):
 def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNet, train_loader, dataset_properties: DatasetProperties, decoder_properties: DecoderProperties, encoding_dim: int):
     coupled_learning_rate = 0.0003
@@ -848,7 +839,7 @@ def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNe
     for i, datapoints in enumerate(train_loader):
         batch_size: int = datapoints.batch_size()
 
-        store_size=decoder_properties.hyd_model_net_props.Indices.STORE_DIM
+        store_size=decoder_properties.hyd_model_net_props.store_dim
 
         #fake_encoding = np.random.uniform(-1, 1, [1, encoding_dim, batch_size])
         encoder_input = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)

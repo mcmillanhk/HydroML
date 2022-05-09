@@ -15,20 +15,16 @@ class HydModelNet(nn.Module):
         self.decoder_properties = decoder_properties
         self.dataset_properties = dataset_properties
 
-        #input_plus_stores_dim = input_dim + self.store_dim()
         self.flow_between_stores = decoder_properties.flow_between_stores
         #self.dropout = nn.Dropout(0.5)
         self.flownet = self.make_flow_net(decoder_properties.num_layers, input_dim, decoder_properties.hidden_dim)
 
         self.store_outflow_dim = self.decoder_properties.b_length()
-        #self.outflow = self.make_outflow_net(num_layers, input_plus_stores_dim, hidden_dim, store_outflow_dim)
-        #self.stores = torch.zeros([self.store_dim()])
-        #self.hyd_data_labels = hyd_data_labels
 
         self.outflow_layer = self.make_outflow_layer(self.store_outflow_dim, decoder_properties)
-        self.inflow_layer = self.make_inflow_layer(decoder_properties.flownet_intermediate_output_dim, self.store_dim())
+        self.inflow_layer = self.make_inflow_layer(decoder_properties.flownet_intermediate_output_dim, self.decoder_properties.store_dim)
         self.et_layer = self.make_et_layer(decoder_properties.flownet_intermediate_output_dim)
-        self.init_store_layer = nn.Linear(encoding_dim, DecoderProperties.HydModelNetProperties.Indices.STORE_DIM)
+        self.init_store_layer = nn.Linear(encoding_dim, self.decoder_properties.store_dim)
 
         self.inflowlog = None
         self.outflowlog = None
@@ -36,10 +32,6 @@ class HydModelNet(nn.Module):
         self.petlog = None
 
         self.weight_stores = 1
-
-        #def parameters(self, recurse=True):
-    def store_dim(self):
-        return self.decoder_properties.Indices.STORE_DIM
 
     def make_flow_net(self, num_layers, input_dim, hidden_dim):
         layers = []
@@ -58,15 +50,8 @@ class HydModelNet(nn.Module):
     @staticmethod
     def make_outflow_layer(output_dim, decoder_properties: DecoderProperties.HydModelNetProperties):
         layer = nn.Linear(decoder_properties.flownet_intermediate_output_dim, output_dim)
-
-        if decoder_properties.scale_b: # in this case we weight the output instead
-            #layers = [layer, nn.ReLU()]  # output >=0
-            layers = [layer, nn.Softplus()]  # output >=0
-        else:
-            layer.bias.data -= 5  # Make the initial values generally small
-            layers = [layer, nn.Sigmoid()]  # output in 0..1
-
-
+        layer.bias.data -= 5  # Make the initial values generally small
+        layers = [layer, nn.Sigmoid()]  # output in 0..1
         return nn.Sequential(*layers)
 
     @staticmethod
@@ -84,28 +69,12 @@ class HydModelNet(nn.Module):
         return nn.Sequential(*layers)
 
     def init_stores(self, batch_size):
-        stores = torch.zeros((batch_size, self.store_dim())).double()   # 0mm initialization
-        #stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = 25  # Start with some non-empty stores (deep, snow)
-        #stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE2] = 25
+        stores = torch.zeros((batch_size, self.decoder_properties.store_dim)).double()   # 0mm initialization
         return stores
 
-    def correct_init_baseflow(self, flow, store_coeff):
-        baseflow = np.percentile(flow, 25, axis=0)  # flow is t x b
-        # Want store_coeff*slowstore = baseflow
-        self.stores[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE] = torch.from_numpy(baseflow / np.maximum(store_coeff.detach().numpy(), 0.00001))
-        if False:
-            print(f"Init slow store {self.stores[0, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE]} from "
-                  f"baseflow {baseflow[0]}/coeff {store_coeff[0]}")
-
-    #def init_hidden(self):
-        # This is what we'll initialise our hidden state as
-        #return (torch.zeros(self.num_layers, self.batch_size, self.hidden_dim),
-        #        torch.zeros(self.num_layers, self.batch_size, self.hidden_dim))
     def forward(self, tuple1):  # hyd_input is t x b x i
         (datapoints, encoding) = tuple1
 
-        #idx_rain = get_indices(['prcp(mm/day)'], self.dataset_properties.climate_norm.keys())[0]
-        #rain = torch.from_numpy(datapoints.climate_data[:, idx_rain, :]/)  # rain is t x b
         rain = self.dataset_properties.get_rain(datapoints)
 
         timesteps = datapoints.timesteps()
@@ -169,17 +138,12 @@ class HydModelNet(nn.Module):
             #print('rain_distn=' + str(rain_distn[0, :]))
             stores = stores + rain_distn  # stores is b x s
 
-            #b = self.outflow(inputs)  # b x s+
-            if self.decoder_properties.scale_b:
-                b = torch.clamp(self.decoder_properties.outflow_weights*self.outflow_layer(outputs), max=1)
-            else:
-                b = self.outflow_layer(outputs)
+            b = self.outflow_layer(outputs)
 
             self.outflowlog[t, :] = b[0, :].detach()
 
             if torch.max(np.isnan(b.data)) == 1:
                 raise Exception("NaN in b")
-            #print("b is ok")
 
             if b.min() < 0 or b.max() > 1:
                 raise Exception("Relative outflow flux outside [0,1]\n" + str(b))
@@ -188,8 +152,6 @@ class HydModelNet(nn.Module):
             if self.flow_between_stores:
                 for destStoreId in range(num_stores):  # Model flow from all other stores to this destination
                     b_interstore = b[:, (destStoreId*num_stores):((destStoreId+1)*num_stores)]
-                    #b_interstore[:, storeId] += 1  # b x s
-                    #b_interstore = nn.Softmax()(b_interstore, dim=1)
                     flow_between = b_interstore * stores  # b x s
                     stores = stores - flow_between
                     stores[:, destStoreId] = stores[:, destStoreId] + flow_between.sum(dim=1)
@@ -215,11 +177,6 @@ class HydModelNet(nn.Module):
                 raise Exception("Negative store\n" + str(stores))
 
             flows[t, :] = flow_distn.sum(1)
-
-            if False and t == 0:
-                #print(f"b_flow={b_flow[0,:]} stores={stores[0,:]}")
-                flow = datapoints.flow_data[0, :, :]
-                self.correct_init_baseflow(flow, b_flow[:, DecoderProperties.HydModelNetProperties.Indices.SLOW_STORE])
 
             self.storelog[t, :] = stores[0, :].detach()
             self.petlog[t, :] = et[0].detach()
