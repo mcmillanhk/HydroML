@@ -1456,16 +1456,24 @@ def train_test_everything(subsample_data):
                                  dataset_properties, model_store_path=model_store_path, ablation_test=(subsample_data <= 0))
 
 
-def load_network(load_decoder, load_encoder, load_encoder_properties, dataset_properties, model_load_path, batch_size):
+def load_network(load_decoder, load_encoder, dataset_properties, model_load_path, batch_size):
     encoder_load_path = model_load_path + 'encoder.ckpt'
     encoder_properties_load_path = model_load_path + 'encoder_properties.pkl'
     decoder_load_path = model_load_path + 'decoder.ckpt'
+    decoder_properties_load_path = model_load_path + 'decoder_properties.pkl'
+
     encoder_properties = EncoderProperties()
-    if load_encoder_properties:
-        #with open(encoder_properties_load_path, 'wb') as outp:
-        #    pickle.dump(encoder_properties, outp)
-        with open(encoder_properties_load_path, 'rb') as input:
-            encoder_properties = pickle.load(input)
+    #with open(encoder_properties_load_path, 'wb') as outp:
+    #    pickle.dump(encoder_properties, outp)
+    with open(encoder_properties_load_path, 'rb') as input:
+        encoder_properties = pickle.load(input)
+
+    decoder_properties = DecoderProperties()
+    #with open(decoder_properties_load_path, 'wb') as outp:
+    #    pickle.dump(decoder_properties, outp)
+    with open(decoder_properties_load_path, 'rb') as input:
+        decoder_properties = pickle.load(input)
+
 
     decoder_properties = DecoderProperties()
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
@@ -1507,7 +1515,7 @@ def do_ablation_test():
 
 def compare_models(model_load_paths):
     dataset_train, dataset_val, dataset_test, dataset_properties \
-        = load_inputs(subsample_data=1, batch_size=batch_size, load_train=True, load_validate=True, load_test=True)
+        = load_inputs(subsample_data=50, batch_size=batch_size, load_train=True, load_validate=True, load_test=True)
     datasets = [dataset_train, dataset_val]
     if dataset_test:
         datasets = datasets + [dataset_test]
@@ -1519,7 +1527,7 @@ def compare_models(model_load_paths):
         model = Object()
         model.name = model_name
         model.decoder, model.decoder_properties, model.encoder, model.encoder_properties =\
-            load_network(True, True, True, dataset_properties, model_load_path, batch_size)
+            load_network(True, True, dataset_properties, model_load_path, batch_size)
         model.encoder.pretrain = False
         model.decoder.weight_stores = 0.001
         models.append(model)
@@ -1556,10 +1564,8 @@ def compare_models(model_load_paths):
 
 torch.manual_seed(0)
 #do_ablation_test()
-train_test_everything(20)
+#train_test_everything(20)
 
-'''
 compare_models([(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
                 (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
                 (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"),])
-'''
