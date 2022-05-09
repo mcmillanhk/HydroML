@@ -161,11 +161,7 @@ class DecoderType(Enum):
 
 # Properties common to all decoders.
 class DecoderProperties:
-
-    def __init__(self):
-        self.decoder_model_type = DecoderType.HydModel
-
-    #Properties specific to HydModelNet
+    # Properties specific to HydModelNet
     class HydModelNetProperties:
         def __init__(self):
             self.scale_b = False
@@ -225,7 +221,9 @@ class DecoderProperties:
 
             return decoder_input
 
-    hyd_model_net_props = HydModelNetProperties()
+    def __init__(self):
+        self.decoder_model_type = DecoderType.HydModel
+        self.hyd_model_net_props = DecoderProperties.HydModelNetProperties()
 
 
 def get_indices(encoder_names, hyd_data_labels):
