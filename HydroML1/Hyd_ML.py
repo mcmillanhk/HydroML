@@ -16,7 +16,7 @@ plotting_freq = 1
 batch_size = 128
 
 def savefig(name, plt):
-    fig_output = r"c:\\hydro\\figs3\\"
+    fig_output = r"c:\\hydro\\default\\"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
     plt.savefig(fig_output + name + '.png')
@@ -578,7 +578,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
             for col in range(input_flow.shape[1]):
                 input_flow1 = input_flow.clone()
                 input_flow1[:, col, :] += 0.1
-                encoding1, _ = encoder((input_flow1, input_fixed)).detach()
+                encoding1 = encoder((input_flow1, input_fixed))[0].detach()
                 delta = encoding_diff(encoding, encoding1)
                 if col not in sums:
                     sums[col] = 0
@@ -589,7 +589,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
             for col in range(input_fixed.shape[1]):
                 input_fixed1 = input_fixed.clone()
                 input_fixed1[:, col] += 0.1
-                encoding1, _ = encoder((input_flow, input_fixed1)).detach()
+                encoding1 = encoder((input_flow, input_fixed1))[0].detach()
                 delta = encoding_diff(encoding, encoding1)
                 key = col + 10
                 if key not in sums:
@@ -1565,9 +1565,10 @@ def compare_models(model_load_paths):
 
 torch.manual_seed(0)
 #do_ablation_test()
-#train_test_everything(1)
-#compare_models([(r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures")])
+train_test_everything(20)
 
+'''
 compare_models([(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
                 (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
                 (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"),])
+'''
