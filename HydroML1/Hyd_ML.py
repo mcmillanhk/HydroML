@@ -55,7 +55,7 @@ def states():
 weight_decay = 0*0.0001
 
 
-def load_inputs(subsample_data=1, batch_size=20, load_train=True, load_validate=True, load_test=False):
+def load_inputs_years(subsample_data, batch_size, load_train, load_validate, load_test, num_years):
     data_root = os.path.join('C:\\', 'hydro', 'basin_dataset_public_v1p2')
     root_dir_flow = os.path.join(data_root, 'usgs_streamflow')
     root_dir_climate = os.path.join(data_root, 'basin_mean_forcing', 'daymet')
@@ -68,21 +68,21 @@ def load_inputs(subsample_data=1, batch_size=20, load_train=True, load_validate=
     dataset_properties = DatasetProperties()
 
     train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, dataset_properties,
-                                     subsample_data=subsample_data, ablation_train=True) if load_train else None
+                                     subsample_data=subsample_data, ablation_train=True, num_years=num_years) if load_train else None
 
     train_loader = None if train_dataset is None else DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
     test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
-                                    dataset_properties, subsample_data=subsample_data) if load_test else None
+                                    dataset_properties, subsample_data=subsample_data, num_years=num_years) if load_test else None
 
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False,
                                                                collate_fn=collate_fn)
 
+    gauge_id = train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data <= 0 else None
     validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, root_dir_climate,
                                         root_dir_signatures, root_dir_flow,
                                         dataset_properties, subsample_data=subsample_data, ablation_validate=True,
-                                        gauge_id=train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data<=0
-                                        else None) if load_validate else None
+                                        gauge_id=gauge_id, num_years=num_years) if load_validate else None
 
     # Data loader
     validate_loader = None if validate_dataset is None else DataLoader(dataset=validate_dataset, batch_size=batch_size,
@@ -92,6 +92,25 @@ def load_inputs(subsample_data=1, batch_size=20, load_train=True, load_validate=
         check_dataloaders(train_loader, validate_loader)
 
     return train_loader, validate_loader, test_loader, dataset_properties
+
+
+def load_inputs(subsample_data, batch_size, load_train, load_validate, load_test, encoder_years, decoder_years):
+    train_loader_enc, validate_loader_enc, test_loader_enc, dataset_properties = load_inputs_years(subsample_data,
+                                                                                       batch_size,
+                                                                                       load_train, load_validate,
+                                                                                       load_test, encoder_years)
+    if decoder_years == encoder_years:
+        (train_loader_dec, validate_loader_dec, test_loader_dec) = (train_loader_enc, validate_loader_enc,
+                                                                    test_loader_enc)
+    else:
+        train_loader_dec, validate_loader_dec, test_loader_dec, dataset_properties = load_inputs_years(subsample_data,
+                                                                                       batch_size,
+                                                                                       load_train, load_validate,
+                                                                                       load_test, decoder_years)
+    return DataLoaders(train_loader_enc, train_loader_dec) if load_train else None,\
+           DataLoaders(validate_loader_enc, validate_loader_dec) if load_validate else None, \
+           DataLoaders(test_loader_enc, test_loader_dec) if load_test else None, dataset_properties
+
 
 
 def moving_average(a, n=451):
@@ -116,18 +135,22 @@ class ConvEncoder(nn.Module):
             nn.Conv1d(32, self.output_dim(), kernel_size=7, stride=2, padding=5),
             encoder_properties.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
-        l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
-        self.layer4 = nn.Sequential(
-            nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
+        #l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
+        self.layer4 = None
+            #nn.Sequential(
+            #nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
 
     @staticmethod
     def output_dim():
         return 16
 
     def forward(self, hydro_data):
+
         out = self.layer1(hydro_data)  # flow_data is b x t x i
         out = self.layer2(out)
         out = self.layer3(out)
+        if self.layer4 is None:
+            self.layer4 = nn.AvgPool1d(kernel_size=out.shape[2], stride=out.shape[2])
         out = self.layer4(out)
         return out.reshape(out.size(0), -1)
 
@@ -242,7 +265,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     max_gauge = ['X'] * encoder_properties.encoding_dim()
     max_vals = np.zeros(encoder_properties.encoding_dim()) - 1000
     for data_loader in data_loaders:
-        for idx, datapoints in enumerate(data_loader):
+        for idx, datapoints in enumerate(data_loader.enc):
             hyd_data = encoder_properties.select_encoder_inputs(
                 datapoints, dataset_properties)  # t x i x b
 
@@ -429,14 +452,14 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
     for data_loader in data_loaders:
         for model in models:
             results[model.name].enc_inputs = all_encoder_inputs(data_loader, model.encoder_properties, dataset_properties)
-        for idx, datapoints in enumerate(data_loader):
+        for idx, datapoints in enumerate(data_loader.dec):
             for model in models:
                 res = results[model.name]
 
                 #hyd_data = model.encoder_properties.select_encoder_inputs(
                 #    datapoints, dataset_properties)  # t x i x b
                 #
-                all_enc = one_encoding_per_run(datapoints, model.encoder, model.encoder_properties, dataset_properties,
+                all_enc = one_encoding_per_run(datapoints.gauge_id_int, model.encoder, model.encoder_properties, dataset_properties,
                                                res.enc_inputs)
 
                 outputs = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
@@ -484,7 +507,7 @@ def print_corr(correlations, signame, enc_names):
 def all_encoder_inputs(data_loader: DataLoader, encoder_properties: EncoderProperties,
                        dataset_properties: DatasetProperties):
     encoder_inputs = {}
-    for idx, datapoints in enumerate(data_loader):
+    for idx, datapoints in enumerate(data_loader.enc):
         hyd_data = encoder_properties.select_encoder_inputs(
             datapoints, dataset_properties)  # t x i x b ??
 
@@ -526,12 +549,12 @@ def all_encodings(datapoint: DataPoint, encoder: nn.Module, encoder_properties: 
 
 
 # Return a tensor with one random encoding per batch item
-def one_encoding_per_run(datapoint: DataPoint, encoder: nn.Module, encoder_properties: EncoderProperties,
+def one_encoding_per_run(gauge_id_int, encoder: nn.Module, encoder_properties: EncoderProperties,
                          dataset_properties: DatasetProperties, all_enc_inputs):
     encoder.train()
     first_enc_input = list(all_enc_inputs.values())[0]
     encoder_inputs = None
-    batch_size = len(datapoint.gauge_id_int)
+    batch_size = len(gauge_id_int)
     encode_hyd_data = first_enc_input[0] is not None
     if encode_hyd_data:
         encoder_input_dim1 = first_enc_input[0].shape[1]
@@ -540,7 +563,7 @@ def one_encoding_per_run(datapoint: DataPoint, encoder: nn.Module, encoder_prope
     attrib_data_dim = None if first_enc_input[1] is None else first_enc_input[1].shape[1]
     attrib_data = None if attrib_data_dim is None else torch.zeros((batch_size, attrib_data_dim), dtype=torch.double)
     idx = 0
-    for gauge_id in datapoint.gauge_id_int:
+    for gauge_id in gauge_id_int:
         if encode_hyd_data:
             encoding_id = np.random.randint(0, all_enc_inputs[gauge_id][0].shape[0])
             encoder_inputs[idx, :, :] = all_enc_inputs[gauge_id][0][encoding_id, :]
@@ -1068,8 +1091,8 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         plot_idx = []
         validate_plot_idx=[]
     else:
-        plot_idx = plot_indices(plotting_freq, len(train_loader))
-        validate_plot_idx = plot_indices(plotting_freq, len(validate_loader))
+        plot_idx = plot_indices(plotting_freq, len(train_loader.dec))
+        validate_plot_idx = plot_indices(plotting_freq, len(validate_loader.dec))
 
     decoder.weight_stores = 0.001
     er = EpochRunner()
@@ -1197,13 +1220,13 @@ class EpochRunner:
 
     def run_dataloader_epoch(self, train, all_enc_inputs, criterion, dataset_properties, decoder, decoder_properties, encoder,
                              encoder_properties, loss_list, optimizer, plot_idx, randomize_encoding,
-                             train_loader, validate_loss_list):
+                             data_loader, validate_loss_list):
 
         local_loss_list = []
         sigs = ["runoff_ratio", "q_mean"]
         temp_sig_list = {sig: [] for sig in sigs}
 
-        for idx, datapoints in enumerate(train_loader):
+        for idx, datapoints in enumerate(data_loader.dec):
             if train:
                 encoder.train()
                 decoder.train()
@@ -1214,7 +1237,7 @@ class EpochRunner:
             if randomize_encoding:
                 all_enc = all_encodings(datapoints, encoder, encoder_properties, all_enc_inputs)
             else:
-                all_enc = one_encoding_per_run(datapoints, encoder, encoder_properties, dataset_properties, all_enc_inputs)
+                all_enc = one_encoding_per_run(datapoints.gauge_id_int, encoder, encoder_properties, dataset_properties, all_enc_inputs)
 
             output_model_flow = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, all_enc)
@@ -1242,7 +1265,7 @@ class EpochRunner:
             if idx in plot_idx:
                 try:
                     plot_training(train, datapoints, dataset_properties, decoder, gt_flow, idx,
-                                  loss_list, output_model_flow, len(train_loader), validate_loss_list, nse_err)
+                                  loss_list, output_model_flow, len(data_loader.dec), validate_loss_list, nse_err)
                 except Exception as e:
                     print("Plotting error " + str(e))
 
@@ -1252,9 +1275,9 @@ class EpochRunner:
         return local_loss_list
 
     def debug_gradients(self, decoder, encoder):
-        for netname, net in {'encoder-': encoder, 'decoder-': decoder}.items():
+        for net_name, net in {'encoder-': encoder, 'decoder-': decoder}.items():
             for name, param in net.named_parameters():
-                self.examine(netname + name, param)
+                self.examine(net_name + name, param)
 
 
 def plot_indices(num_plots, total_step):
@@ -1433,7 +1456,8 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 def train_test_everything(subsample_data):
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=subsample_data, batch_size=batch_size)
+        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
+                      load_test=False, encoder_years=1, decoder_years=1)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
@@ -1449,7 +1473,7 @@ def train_test_everything(subsample_data):
     load_decoder = True
 
     decoder, decoder_properties, encoder, encoder_properties = load_network(load_decoder, load_encoder,
-                                                                            load_encoder_properties, dataset_properties,
+                                                                            dataset_properties,
                                                                             model_load_path, batch_size)
 
     return train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
@@ -1479,6 +1503,7 @@ def load_network(load_decoder, load_encoder, dataset_properties, model_load_path
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
+        encoder.layer4 = None  # recreate this on-the-fly to match the amount of input
     if load_decoder:
         decoder.load_state_dict(torch.load(decoder_load_path))
     return decoder, decoder_properties, encoder, encoder_properties
@@ -1515,7 +1540,8 @@ def do_ablation_test():
 
 def compare_models(model_load_paths):
     dataset_train, dataset_val, dataset_test, dataset_properties \
-        = load_inputs(subsample_data=50, batch_size=batch_size, load_train=True, load_validate=True, load_test=True)
+        = load_inputs(subsample_data=50, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
+                      encoder_years=3, decoder_years=2)
     datasets = [dataset_train, dataset_val]
     if dataset_test:
         datasets = datasets + [dataset_test]
@@ -1545,7 +1571,6 @@ def compare_models(model_load_paths):
 
         print(f"Median NSE {model.name}: {np.median(model.nse)} mean {np.mean(model.nse)}")
 
-        #if model.encoder_properties.encode_hydro_met_data:
         print(f"Encoder from {model.name}:")
         test_encoder(datasets, model.encoder, model.encoder_properties, dataset_properties)
 
@@ -1564,8 +1589,8 @@ def compare_models(model_load_paths):
 
 torch.manual_seed(0)
 #do_ablation_test()
-#train_test_everything(20)
+train_test_everything(50)
 
-compare_models([(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
-                (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
-                (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"),])
+#compare_models([(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
+#                (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
+#                (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"),])

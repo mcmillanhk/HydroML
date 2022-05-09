@@ -20,7 +20,8 @@ class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
     def __init__(self, csv_file, root_dir_climate, root_dir_signatures, root_dir_flow,
-                 dataset_properties: DatasetProperties, subsample_data, ablation_train=False, ablation_validate=False, gauge_id=None):
+                 dataset_properties: DatasetProperties, subsample_data, ablation_train=False, ablation_validate=False,
+                 gauge_id=None, num_years=-1):
         """
         Args:
             csv_file (string): Path to the csv file with signatures.
@@ -67,7 +68,7 @@ class CamelsDataset(Dataset):
         self.root_dir_flow = root_dir_flow
         #self.hyd_data_labels = None
         #self.sig_labels = None
-        self.years_per_sample = dataset_properties.years_per_sample
+        self.years_per_sample = num_years
 
         """number of samples depends on years/sample. """
         num_sites = len(self.signatures_frame)
@@ -142,7 +143,7 @@ class CamelsDataset(Dataset):
         water_years = flow_data[select_water_year]
         indices = flow_data.index[select_water_year]
 
-        range_end = water_years.shape[0] - dataset_properties.years_per_sample
+        range_end = water_years.shape[0] - self.years_per_sample
         if ablation_train:
             range_end = range_end - 3
         range_start = (range_end - 3) if ablation_validate else 0
@@ -153,12 +154,12 @@ class CamelsDataset(Dataset):
 
         for year_idx in range(range_start, range_end):
             record_start = water_years.iloc[year_idx]
-            record_end = water_years.iloc[year_idx + dataset_properties.years_per_sample]
+            record_end = water_years.iloc[year_idx + self.years_per_sample]
             if record_end['qc'] > record_start['qc']:
                 continue  # There's bad data in this interval
 
-            flow_data_subset = flow_data.iloc[list(range(indices[year_idx], indices[year_idx + dataset_properties.
-                                                         years_per_sample]))].reset_index(drop=True)
+            flow_data_subset = flow_data.iloc[list(range(indices[year_idx], indices[year_idx +
+                self.years_per_sample]))].reset_index(drop=True)
             # print(flow_data_subset.columns)
             flow_date_start = pd.datetime(int(record_start['year']), int(record_start['month']),
                                           int(record_start['day'])).date()
@@ -183,9 +184,10 @@ class CamelsDataset(Dataset):
                                                     climate_data_subset.drop(['date'], axis=1)))
 
     def clamp_length(self, dataset_properties, flow_data_subset):
-        if flow_data_subset.shape[0] > dataset_properties.length_days:
+        length_days = 365*self.years_per_sample
+        if flow_data_subset.shape[0] > length_days:
             flow_data_subset.drop(
-                flow_data_subset.tail(flow_data_subset.shape[0] - dataset_properties.length_days).index, inplace=True)
+                flow_data_subset.tail(flow_data_subset.shape[0] - length_days).index, inplace=True)
 
     def get_subdir_filename(self, root_dir, gauge_id, file_suffix):
         flow_file = gauge_id + file_suffix

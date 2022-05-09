@@ -1,4 +1,7 @@
 from enum import Enum
+
+from torch.utils.data import DataLoader
+
 from DataPoint import *
 import pandas as pd
 import numpy as np
@@ -13,8 +16,8 @@ class EncType(Enum):
 
 
 class DatasetProperties:
-    years_per_sample = 1
-    length_days: int = 365 * years_per_sample
+    #years_per_sample = 1
+    #length_days: int = 365 * years_per_sample
 
     #  attribs: dict of attrib/normalizing factor for each site
     attrib_normalizers = {'carbonate_rocks_frac': 1.0,  # Numbers, not categories, from geol.
@@ -236,6 +239,12 @@ def get_indices(encoder_names, hyd_data_labels):
 def print_inputs(name, hyd_data):
     hyd_data.max().max()
     print(name + f' inputs max {torch.max(torch.max(hyd_data))}, mean {torch.mean(torch.mean(hyd_data))}')
+
+
+class DataLoaders:
+    def __init__(self, enc: DataLoader, dec: DataLoader):
+        self.enc: DataLoader = enc
+        self.dec: DataLoader = dec
 
 
 dropout_rate = 0 # 0.33
