@@ -31,8 +31,6 @@ class HydModelNet(nn.Module):
         self.storelog = None
         self.petlog = None
 
-        self.weight_stores = 1
-
     def make_flow_net(self, num_layers, input_dim, hidden_dim):
         layers = []
         for i in range(num_layers):
@@ -91,6 +89,7 @@ class HydModelNet(nn.Module):
         fixed_data = None
 
         #print_inputs('Decoder fixed_data', fixed_data)
+        init_stores = None
 
         for t in range(timesteps):
             if fixed_data is None and type(encoding) != dict:
@@ -107,14 +106,14 @@ class HydModelNet(nn.Module):
                     encoding_id = np.random.randint(0, len(encoding[datapoints.gauge_id_int[b]]))
                     fixed_data[b, :] = encoding[datapoints.gauge_id_int[b]][encoding_id, :]
             if t == 0:
-                stores = self.init_store_layer(fixed_data).exp()
+                stores = init_stores = self.init_store_layer(fixed_data).exp()
                 # print(f"Init stores 0: {stores[0, :]}")
 
             climate_input = datapoints.climate_data[:, t, :]
             if self.decoder_properties.decoder_include_stores:
                 log_stores = stores.clamp(min=0.1).log()
                 inputs = torch.cat((climate_input, fixed_data,
-                                    log_stores*self.weight_stores), 1)  # b x i
+                                    log_stores*self.decoder_properties.weight_stores), 1)  # b x i
             else:
                 inputs = torch.cat((climate_input, fixed_data), 1)  # b x i
 
@@ -187,4 +186,4 @@ class HydModelNet(nn.Module):
         if torch.max(np.isnan(flows.data)) == 1:
             raise Exception("Negative flow")
 
-        return flows
+        return flows, init_stores - stores

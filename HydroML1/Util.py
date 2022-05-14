@@ -116,6 +116,7 @@ class EncoderProperties:
         self.encode_attributes = True
         self.encode_signatures = True
         self.encode_hydro_met_data = False
+        self.pretrain = False
 
 
     def get_activation(self):
@@ -175,6 +176,7 @@ class DecoderProperties:
             self.decoder_include_stores = True
             self.decoder_include_fixed = False
             self.store_dim = 8
+            self.weight_stores = 0.001
 
         def b_length(self):
             return self.store_dim * (self.store_dim + 2) if self.flow_between_stores \

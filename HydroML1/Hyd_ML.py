@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from torch.utils.data import DataLoader
 import CAMELS_data as Cd
 import os
@@ -11,6 +12,7 @@ from Util import *
 import random
 import shapefile as shp
 import pickle
+from scipy import stats
 
 plotting_freq = 1
 batch_size = 128
@@ -170,7 +172,6 @@ class Encoder(nn.Module):
 
         self.fc_predict_sigs = nn.Linear(encoder_properties.encoding_dim(), dataset_properties.num_sigs())
 
-        self.pretrain = True
         self.encoder_properties = encoder_properties
 
     def forward(self, x):
@@ -188,7 +189,7 @@ class Encoder(nn.Module):
         # out = self.drop_out(out)
         out = self.fc1(out)
         out = self.fc2(out)
-        if self.pretrain:
+        if self.encoder_properties.pretrain:
             out = self.fc_predict_sigs(out)
         return out, hydro_met_encoding  # both b x e
 
@@ -320,16 +321,19 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         savefig(label, plt)
         plt.show()
 
-        M = np.corrcoef(encodings, rowvar=False)
+        rank = True
+        M = stats.spearmanr(encodings).correlation if rank else np.corrcoef(encodings, rowvar=False)
+        M = np.nan_to_num(M)
         np.set_printoptions(precision=3, threshold=1000, linewidth=250)
         if False:
             print("Correlation matrix:")
             print(M)
 
         try:
-            u, s, vh = np.linalg.svd(M)
+            u, s, vh = np.linalg.svd(M, hermitian=True)
         except np.linalg.LinAlgError:
             print ("SVD failed: numpy.linalg.LinAlgError")
+            print(M)
             return
 
         print(f"sv: {s}")
@@ -436,8 +440,6 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
     for model in models:
         model.encoder.eval()
         model.decoder.eval()
-        print(f"{model.decoder.weight_stores=}")
-        print(f"{model.encoder.pretrain=}")
 
 
     results = {}
@@ -462,7 +464,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 all_enc = one_encoding_per_run(datapoints.gauge_id_int, model.encoder, model.encoder_properties, dataset_properties,
                                                res.enc_inputs)
 
-                outputs = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
+                outputs, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
                                               model.decoder_properties, dataset_properties, all_enc)
                 flow = datapoints.flow_data  #.squeeze(2).transpose(0,1)  # t x b
                 #loss, _ = nse_loss(outputs, flow) # both inputs should be t x b
@@ -586,7 +588,7 @@ def encoding_diff(t1, t2):
 def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperties,
                   dataset_properties: DatasetProperties, all_enc_inputs):
     encoder.eval()
-    encodings = {}
+
     sums = {}
     names = {}
     en = encoder_properties.encoding_names(dataset_properties)
@@ -600,7 +602,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
         if input_flow is not None:
             for col in range(input_flow.shape[1]):
                 input_flow1 = input_flow.clone()
-                input_flow1[:, col, :] += 0.1
+                input_flow1[:, col, :] *= 1.01
                 encoding1 = encoder((input_flow1, input_fixed))[0].detach()
                 delta = encoding_diff(encoding, encoding1)
                 if col not in sums:
@@ -611,10 +613,10 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
         if input_fixed is not None:
             for col in range(input_fixed.shape[1]):
                 input_fixed1 = input_fixed.clone()
-                input_fixed1[:, col] += 0.1
+                input_fixed1[:, col] *= 1.01
                 encoding1 = encoder((input_flow, input_fixed1))[0].detach()
                 delta = encoding_diff(encoding, encoding1)
-                key = col + 10
+                key = col + 6
                 if key not in sums:
                     sums[key] = 0
                 sums[key] += delta
@@ -623,7 +625,8 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
     print(sums)
     fig = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(1, 1, 1)
-    ax.plot(sums.keys(), sums.values())
+    #ax.plot(sums.keys(), sums.values())
+    ax.bar(sums.keys(), sums.values())
     ax.set_xticks(list(names.keys()))
     ax.set_xticklabels(names.values(), rotation='vertical', fontsize=6)
     fig.tight_layout()
@@ -846,8 +849,6 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
 def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNet, train_loader, dataset_properties: DatasetProperties, decoder_properties: DecoderProperties, encoding_dim: int):
     coupled_learning_rate = 0.0003
 
-    encoder.pretrain = False
-
     criterion = nn.MSELoss()  #  nn.MSELoss()
     params = list(decoder.parameters())
     #params = list(decoder.outflow_layer.parameters()) + list(decoder.inflow_layer.parameters()) + list(decoder.flownet.parameters())
@@ -1056,8 +1057,6 @@ def check_dataloaders(train_loader, validate_loader):
 def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
                           model_store_path, ablation_test):
-    encoder.pretrain = False
-
     coupled_learning_rate = 0.01 if ablation_test else 0.001
     output_epochs = 800
 
@@ -1075,7 +1074,6 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay,
                             'lr': coupled_learning_rate/1}]
 
-    #opt_decoder = torch.optim.Adam(decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
     opt_full = torch.optim.Adam(encoder_params + decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
     optimizer = opt_full
 
@@ -1135,11 +1133,6 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
         validate_loss_list.extend(val_nse)
 
         print(f'Median validation NSE epoch {epoch}/{output_epochs} = {np.median(val_nse):.3f} training NSE {np.median(train_nse):.3f}')
-
-        """if np.median(val_nse)>0.4:
-            decoder.weight_stores=1
-        elif np.median(val_nse)>0.2:
-            decoder.weight_stores=0.2"""
 
         if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
             test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
@@ -1226,6 +1219,8 @@ class EpochRunner:
         sigs = ["runoff_ratio", "q_mean"]
         temp_sig_list = {sig: [] for sig in sigs}
 
+        weight = 0.01
+
         for idx, datapoints in enumerate(data_loader.dec):
             if train:
                 encoder.train()
@@ -1239,11 +1234,17 @@ class EpochRunner:
             else:
                 all_enc = one_encoding_per_run(datapoints.gauge_id_int, encoder, encoder_properties, dataset_properties, all_enc_inputs)
 
-            output_model_flow = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
+            output_model_flow, store_error = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, all_enc)
 
             gt_flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
             nse_err, huber_loss = compute_loss(criterion, gt_flow, output_model_flow)
+
+            hl = torch.nn.HuberLoss(delta=5)
+            store_loss = hl(store_error, torch.zeros(store_error.shape).double())
+            weight = 0.01 * huber_loss.detach().mean() / (huber_loss.detach().mean() + store_loss.detach().mean())
+            #print(f"{weight=}")
+            huber_loss += store_loss * weight
 
             local_loss_list.extend(nse_err.tolist())
 
@@ -1385,14 +1386,13 @@ def run_encoder_decoder_hydmodel(decoder: HydModelNet, encoder, datapoints: Data
             encoding = temp[:, -1, :]  # b x o
         elif encoder_properties.encoder_type == EncType.CNNEncoder:
             #hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)
-            encoder.pretrain = False
             encoding, _ = encoder(encoder_input)  # input b x t x i
 
         outputs = decoder((datapoints, encoding))  # b x t [expect
     else:
         outputs = decoder((datapoints, all_encodings))  # b x t [expect
 
-    if torch.max(np.isnan(outputs.data)) == 1:
+    if torch.max(np.isnan(outputs[0].data)) == 1:
         raise Exception('nan generated')
     return outputs
 
@@ -1538,13 +1538,15 @@ def do_ablation_test():
         fig.show()
 
 
-def compare_models(model_load_paths):
+def compare_models(subsample_data, model_load_paths):
     dataset_train, dataset_val, dataset_test, dataset_properties \
-        = load_inputs(subsample_data=50, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
-                      encoder_years=3, decoder_years=2)
-    datasets = [dataset_train, dataset_val]
-    if dataset_test:
-        datasets = datasets + [dataset_test]
+        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=False, load_validate=True, load_test=False,
+                      encoder_years=1, decoder_years=1)
+    all_datasets = [dataset_train, dataset_val, dataset_test]
+    datasets = []
+    for dataset in all_datasets:
+        if dataset:
+            datasets.append(dataset)
     test = dataset_test if dataset_test else dataset_val
 
 
@@ -1554,8 +1556,6 @@ def compare_models(model_load_paths):
         model.name = model_name
         model.decoder, model.decoder_properties, model.encoder, model.encoder_properties =\
             load_network(True, True, dataset_properties, model_load_path, batch_size)
-        model.encoder.pretrain = False
-        model.decoder.weight_stores = 0.001
         models.append(model)
 
     test_encoder_decoder_nse(datasets, models, dataset_properties)
@@ -1589,8 +1589,8 @@ def compare_models(model_load_paths):
 
 torch.manual_seed(0)
 #do_ablation_test()
-train_test_everything(50)
+#train_test_everything(1)
 
-#compare_models([(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
-#                (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
-#                (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"),])
+compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
+                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
+                   (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"), ])
