@@ -115,7 +115,7 @@ class EncoderProperties:
         self.encoding_hidden_dim = 32
         self.encode_attributes = True
         self.encode_signatures = True
-        self.encode_hydro_met_data = False
+        self.encode_hydro_met_data = True
         self.pretrain = False
 
 

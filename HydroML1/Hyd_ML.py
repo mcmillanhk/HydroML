@@ -96,12 +96,12 @@ def load_inputs_years(subsample_data, batch_size, load_train, load_validate, loa
     return train_loader, validate_loader, test_loader, dataset_properties
 
 
-def load_inputs(subsample_data, batch_size, load_train, load_validate, load_test, encoder_years, decoder_years):
+def load_inputs(subsample_data, batch_size, load_train, load_validate, load_test, encoder_years, decoder_years=None):
     train_loader_enc, validate_loader_enc, test_loader_enc, dataset_properties = load_inputs_years(subsample_data,
                                                                                        batch_size,
                                                                                        load_train, load_validate,
                                                                                        load_test, encoder_years)
-    if decoder_years == encoder_years:
+    if decoder_years is None or decoder_years == encoder_years:
         (train_loader_dec, validate_loader_dec, test_loader_dec) = (train_loader_enc, validate_loader_enc,
                                                                     test_loader_enc)
     else:
@@ -125,6 +125,7 @@ class ConvEncoder(nn.Module):
     def __init__(self, dataset_properties: DatasetProperties, encoder_properties: EncoderProperties,):
         super(ConvEncoder, self).__init__()
 
+        self.encoder_properties = encoder_properties
         self.layer1 = nn.Sequential(
             nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=7, stride=2, padding=5),  # padding is (kernel_size-1)/2?
             encoder_properties.get_activation(),
@@ -137,24 +138,28 @@ class ConvEncoder(nn.Module):
             nn.Conv1d(32, self.output_dim(), kernel_size=7, stride=2, padding=5),
             encoder_properties.get_activation(),
             nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
-        #l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
         self.layer4 = None
-            #nn.Sequential(
+            # l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
+            #self.layer4 = nn.Sequential(
             #nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
+        self.fc_predict_sigs = nn.Linear(self.output_dim(), dataset_properties.num_sigs())
 
     @staticmethod
     def output_dim():
         return 16
 
-    def forward(self, hydro_data):
-
-        out = self.layer1(hydro_data)  # flow_data is b x t x i
+    def forward(self, input):
+        out = self.layer1(input)  # (input[0] if type(input) is tuple else input)  # flow_data is b x t x i
         out = self.layer2(out)
         out = self.layer3(out)
         if self.layer4 is None:
-            self.layer4 = nn.AvgPool1d(kernel_size=out.shape[2], stride=out.shape[2])
-        out = self.layer4(out)
-        return out.reshape(out.size(0), -1)
+            self.layer4 = nn.Sequential(nn.AvgPool1d(kernel_size=out.shape[2], stride=out.shape[2]), nn.Sigmoid())
+        out = self.layer4(out).reshape(out.size(0), -1)
+
+        if self.encoder_properties.pretrain:
+            out = self.fc_predict_sigs(out)
+
+        return out
 
 
 class Encoder(nn.Module):
@@ -169,8 +174,6 @@ class Encoder(nn.Module):
                                  encoder_properties.get_activation(), nn.Dropout(dropout_rate))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
                                  nn.Sigmoid()) # , nn.Dropout(dropout_rate))
-
-        self.fc_predict_sigs = nn.Linear(encoder_properties.encoding_dim(), dataset_properties.num_sigs())
 
         self.encoder_properties = encoder_properties
 
@@ -189,8 +192,6 @@ class Encoder(nn.Module):
         # out = self.drop_out(out)
         out = self.fc1(out)
         out = self.fc2(out)
-        if self.encoder_properties.pretrain:
-            out = self.fc_predict_sigs(out)
         return out, hydro_met_encoding  # both b x e
 
 
@@ -638,14 +639,13 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
 
 
 def train_encoder_only(encoder, train_loader, validate_loader, dataset_properties: DatasetProperties,
-                       encoder_properties: EncoderProperties, pretrained_encoder_path, batch_size):
+                       encoder_properties: EncoderProperties, pretrained_encoder_path):
 
     num_epochs = 30
-    learning_rate = 0.000005  # 0.001 works well for the subset. So does .0001 (maybe too fast though?)
+    learning_rate = 0.001
+    encoder_properties.pretrain = True
 
     shown = False
-
-    #input_dim = 8 + len(attribs)
 
     # Loss and optimizer
     criterion = nn.SmoothL1Loss()
@@ -653,42 +653,25 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                                  lr=learning_rate, weight_decay=weight_decay)
 
     # Train the model
-    total_step = len(train_loader)
+    total_step = len(train_loader.enc)
     loss_list = []
     validation_loss_list = []
+    error_baseline_mean_list = []
+    show_bl = False  # It's not very useful
     acc_list = []
-    #hyd_data_labels = train_loader.hyd_data_labels
     for epoch in range(num_epochs):
-        #datapoints: list[DataPoint]
         encoder.train()
-        for idx, datapoints in enumerate(train_loader):  #TODO we need to enumerate and batch the correct datapoints
-            hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+        for idx, datapoints in enumerate(train_loader.enc):  #TODO we need to enumerate and batch the correct datapoints
+            hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)[0]  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
 
             if encoder_properties.encoder_type == EncType.LSTMEncoder:
                 encoder.hidden = encoder.init_hidden()
 
-            #elif epoch == 0:
-            #    hyd_data = only_rain(hyd_data)
-
-            #flow = hyd_data[:, :, :]
-            #outputs = model(flow)
-            outputs, _ = encoder(hyd_data)
+            outputs = encoder(hyd_data)
             if torch.max(np.isnan(outputs.data)) == 1:
                 raise Exception('nan generated')
             signatures_ref = datapoints.signatures_tensor()  # np.squeeze(signatures)  # signatures is b x s x ?
             loss = criterion(outputs, signatures_ref)
-
-            """if num_sigs == 1:
-                loss = criterion(outputs[:, 0], signatures[:, 0])
-            else:
-                signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
-                if encoder_type == EncType.LSTMEncoder:
-                    1/0  # restore me
-                #    loss = criterion(outputs[:, int(outputs.shape[1]/8):, :], signatures_ref)
-                #else:
-                loss = criterion(outputs, signatures_ref.squeeze())
-                #final value only
-                #loss = criterion(outputs[:, -1, :], signatures_ref[:, 0, :])"""
             if torch.isnan(loss):
                 raise Exception('loss is nan')
 
@@ -700,14 +683,11 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
             optimizer.step()
 
             # Track the accuracy
-            #total = signatures.size(0)
-            #predicted = outputs[:, -1, :]  # torch.max(outputs.data, 1)
-            #signatures_ref = (signatures if len(signatures.shape) == 2 else signatures.unsqueeze(0)).unsqueeze(1)
             rel_error = np.mean(rel_error_vec(outputs, signatures_ref, dataset_properties))
 
             acc_list.append(rel_error.item())
 
-            if idx == len(train_loader)-1:
+            if idx == len(train_loader.enc)-1:
                 print(f'Epoch {epoch} / {num_epochs}, Step {idx} / {total_step}, Loss: {loss.item():.3f}, Error norm: '
                       f'{rel_error:.3f}')
                 num2plot = signatures_ref.shape[1]
@@ -717,7 +697,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                 ax1 = fig.add_subplot(3, 1, 3)
                 fig.canvas.draw()
 
-                ax_input.plot(hyd_data[0][:, 0, :].numpy())  #Batch 0
+                ax_input.plot(hyd_data[:, 0, :].numpy())  #Batch 0
                 colors = plt.cm.jet(np.linspace(0, 1, num2plot))
                 for j in range(num2plot):  # range(num_sigs):
                     if encoder_properties.encoder_type == EncType.LSTMEncoder:
@@ -752,36 +732,45 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
             validation_loss = []
             baseline_loss = []
             rel_error = None
-            for idx, datapoints in enumerate(validate_loader):  #TODO we need to enumerate and batch the correct datapoints
-                hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
-                outputs, _ = encoder(hyd_data)
+            for idx, datapoints in enumerate(validate_loader.enc):  #TODO we need to enumerate and batch the correct datapoints
+                hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)[0]  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
+                outputs = encoder(hyd_data)
                 signatures_ref = datapoints.signatures_tensor()
                 error = criterion(outputs, signatures_ref).item()
-                error_bl = criterion(0*outputs, signatures_ref).item()  # relative to predicting 0 for everything
                 validation_loss.append(error)
-                baseline_loss.append(error_bl)
+                if show_bl:
+                    error_bl = criterion(0*outputs, signatures_ref).item()  # relative to predicting 0 for everything
+                    baseline_loss.append(error_bl)
 
                 rev = rel_error_vec(outputs, signatures_ref, dataset_properties)
                 rel_error = rev if rel_error is None else np.concatenate((rel_error, rev))
 
             print(f'Test Accuracy of the model on the test data (mean loss): {np.mean(validation_loss)}')
-            error_baseline_mean = np.nanmean(np.fabs(baseline_loss), axis=0)
-            print(f'Baseline test accuracy (mean abs error): {error_baseline_mean}')
+            if show_bl:
+                error_baseline_mean = np.nanmean(np.fabs(baseline_loss), axis=0)
+                print(f'Baseline test accuracy (mean abs error): {error_baseline_mean}')
 
         # Save the model and plot
-        torch.save(encoder.state_dict(), pretrained_encoder_path)
+        if pretrained_encoder_path is not None:
+            torch.save(encoder.state_dict(), pretrained_encoder_path)
 
         validation_loss_list += validation_loss
+        if show_bl:
+            error_baseline_mean_list += baseline_loss
 
         errorfig = plt.figure()
         ax_errorfig = errorfig.add_subplot(2, 1, 1)
         ax_errorfig.plot(validation_loss_list, label="Test_Error")
-        ax_errorfig.plot(error_baseline_mean, label="Baseline_Error")
+        if show_bl:
+            ax_errorfig.plot(error_baseline_mean_list, label="Baseline_Error")
         ax_errorfig.legend()
 
         ax_boxwhisker = errorfig.add_subplot(2, 1, 2)
-        ax_boxwhisker.boxplot(rel_error, labels=list(dataset_properties.sig_normalizers.keys()), vert=False)
-        ax_boxwhisker.set_xlim(0, 5)
+        ax_boxwhisker.boxplot(rel_error, labels=list(dataset_properties.sig_normalizers.keys()), vert=False,
+                              whis=[5, 95], showfliers=False)
+        ax_boxwhisker.set_xlim(0, 3)
+        errorfig.tight_layout()
+        ax_boxwhisker.set_title("Relative error distribution")
         errorfig.show()
 
 
@@ -806,7 +795,7 @@ def validate(dataloader, encoder, decoder):
 
 
 def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_properties: DatasetProperties,
-                          decoder_properties: DecoderProperties, batch_size: int): #, encoder_layers, encoding_dim, hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim, hyd_data_labels):
+                          decoder_properties: DecoderProperties): #, encoder_layers, encoding_dim, hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim, hyd_data_labels):
 
     if encoder_properties.encoder_type == EncType.CNNEncoder:
         encoder = Encoder(dataset_properties, encoder_properties,).double()
@@ -1463,9 +1452,8 @@ def train_test_everything(subsample_data):
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
-    load_encoder_properties = True
-    load_encoder = True
-    load_decoder = True
+    load_encoder = False
+    load_decoder = False
 
     decoder, decoder_properties, encoder, encoder_properties = load_network(load_decoder, load_encoder,
                                                                             dataset_properties,
@@ -1497,7 +1485,7 @@ def load_network(load_decoder, load_encoder, dataset_properties, model_load_path
         if not hasattr(decoder_properties.hyd_model_net_props, 'weight_stores'):
             decoder_properties.hyd_model_net_props.weight_stores = 0.001
 
-    encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
+    encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties)
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
         encoder.layer4 = None  # recreate this on-the-fly to match the amount of input
@@ -1583,11 +1571,22 @@ def compare_models(subsample_data, model_load_paths):
     fig.show()
 
 
+def can_encoder_learn_sigs(subsample_data):
+    dataset_train, dataset_validate, _, dataset_properties \
+        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
+                      encoder_years=5)
+    encoder_properties = EncoderProperties()
+    encoder = ConvEncoder(dataset_properties, encoder_properties).double()
+    train_encoder_only(encoder, dataset_train, dataset_validate, dataset_properties, encoder_properties, None)
+
 
 torch.manual_seed(0)
 #do_ablation_test()
-#train_test_everything(1)
+#train_test_everything(50)
 
+can_encoder_learn_sigs(1)
+"""
 compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
                    (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
                    (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"), ])
+"""
