@@ -764,22 +764,17 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                 rev = rel_error_vec(outputs, signatures_ref, dataset_properties)
                 rel_error = rev if rel_error is None else np.concatenate((rel_error, rev))
 
-            #error_test[np.isinf(error_test)] = np.nan
-            #error_test_mean = np.nanmean(np.fabs(error_test), axis=0)
             print(f'Test Accuracy of the model on the test data (mean loss): {np.mean(validation_loss)}')
             error_baseline_mean = np.nanmean(np.fabs(baseline_loss), axis=0)
             print(f'Baseline test accuracy (mean abs error): {error_baseline_mean}')
 
-        #np.linalg.norm(error_test, axis=0)
         # Save the model and plot
         torch.save(encoder.state_dict(), pretrained_encoder_path)
 
-        #while(len(validation_loss_list) < len(loss_list)):
         validation_loss_list += validation_loss
 
         errorfig = plt.figure()
         ax_errorfig = errorfig.add_subplot(2, 1, 1)
-        #x = np.array(range(len(validation_loss_list)))
         ax_errorfig.plot(validation_loss_list, label="Test_Error")
         ax_errorfig.plot(error_baseline_mean, label="Baseline_Error")
         ax_errorfig.legend()

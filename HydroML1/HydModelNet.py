@@ -80,16 +80,17 @@ class HydModelNet(nn.Module):
         flows = torch.zeros([timesteps, batch_size]).double()
 
         stores = self.init_stores(batch_size)
+        num_stores = stores.shape[1]
 
-        self.inflowlog = np.zeros((timesteps, stores.shape[1]))
+        self.inflowlog = np.zeros((timesteps, num_stores))
         self.outflowlog = np.zeros((timesteps, self.store_outflow_dim))
-        self.storelog = np.zeros((timesteps, stores.shape[1]))
+        self.storelog = np.zeros((timesteps, num_stores))
         self.petlog = np.zeros((timesteps, 1))
 
         fixed_data = None
-
-        #print_inputs('Decoder fixed_data', fixed_data)
         init_stores = None
+
+        error_check = False
 
         for t in range(timesteps):
             if fixed_data is None and type(encoding) != dict:
@@ -105,9 +106,9 @@ class HydModelNet(nn.Module):
                 for b in range(batch_size):
                     encoding_id = np.random.randint(0, len(encoding[datapoints.gauge_id_int[b]]))
                     fixed_data[b, :] = encoding[datapoints.gauge_id_int[b]][encoding_id, :]
+
             if t == 0:
                 stores = init_stores = self.init_store_layer(fixed_data).exp()
-                # print(f"Init stores 0: {stores[0, :]}")
 
             climate_input = datapoints.climate_data[:, t, :]
             if self.decoder_properties.decoder_include_stores:
@@ -117,9 +118,6 @@ class HydModelNet(nn.Module):
             else:
                 inputs = torch.cat((climate_input, fixed_data), 1)  # b x i
 
-            #if i == 0:
-            #    print_inputs('Decoder inputs', inputs)
-
             outputs = self.flownet(inputs)
             a = self.inflow_layer(outputs) # a is b x stores
             if a.min() < 0 or a.max() > 1:
@@ -128,26 +126,20 @@ class HydModelNet(nn.Module):
             self.inflowlog[t, :] = a[0, :].detach()
 
             et = self.et_layer(outputs)
-            #corrected_rain,_ = torch.max(rain[i, :] - et, 0)  # Actually the same as a relu
             corrected_rain = nn.ReLU()(rain[:, t] - et.squeeze(1))
-            #rain[i, :] = corrected_rain
             rain_distn = a * corrected_rain.unsqueeze(1)  # (b x stores) . (b x 1)
-            #print('a0=' + str(a[0, :]))
-            #print('rain[i, :].unsqueeze(1)=' + str(rain[i, 0]))
-            #print('rain_distn=' + str(rain_distn[0, :]))
             stores = stores + rain_distn  # stores is b x s
 
             b = self.outflow_layer(outputs)
 
             self.outflowlog[t, :] = b[0, :].detach()
 
-            if torch.max(np.isnan(b.data)) == 1:
-                raise Exception("NaN in b")
+            if error_check:
+                if torch.max(np.isnan(b.data)) == 1:
+                    raise Exception("NaN in b")
+                if b.min() < 0 or b.max() > 1:
+                    raise Exception("Relative outflow flux outside [0,1]\n" + str(b))
 
-            if b.min() < 0 or b.max() > 1:
-                raise Exception("Relative outflow flux outside [0,1]\n" + str(b))
-
-            num_stores = stores.shape[1]
             if self.flow_between_stores:
                 for destStoreId in range(num_stores):  # Model flow from all other stores to this destination
                     b_interstore = b[:, (destStoreId*num_stores):((destStoreId+1)*num_stores)]
@@ -162,28 +154,27 @@ class HydModelNet(nn.Module):
             b_flow = b[:, (-num_stores):]
             flow_distn = b_flow * stores
 
-            if torch.max(np.isnan(b_flow.data)) == 1:
-                raise Exception("NaN in b_flow")
-            if torch.max(np.isnan(stores.data)) == 1:
-                raise Exception("NaN in stores")
-
-            if torch.max(np.isnan(flow_distn.data)) == 1:
-                raise Exception("NaN in flow_distn")
-
             stores = stores - flow_distn
 
-            if stores.min() < 0:
-                raise Exception("Negative store\n" + str(stores))
+            if error_check:
+                if torch.max(np.isnan(b_flow.data)) == 1:
+                    raise Exception("NaN in b_flow")
+                if torch.max(np.isnan(stores.data)) == 1:
+                    raise Exception("NaN in stores")
+                if torch.max(np.isnan(flow_distn.data)) == 1:
+                    raise Exception("NaN in flow_distn")
+                if stores.min() < 0:
+                    raise Exception("Negative store\n" + str(stores))
 
             flows[t, :] = flow_distn.sum(1)
 
             self.storelog[t, :] = stores[0, :].detach()
             self.petlog[t, :] = et[0].detach()
 
-        if flows.min() < 0:
-            raise Exception("Negative flow")
-
-        if torch.max(np.isnan(flows.data)) == 1:
-            raise Exception("Negative flow")
+        if error_check:
+            if flows.min() < 0:
+                raise Exception("Negative flow")
+            if torch.max(np.isnan(flows.data)) == 1:
+                raise Exception("Nan in flow")
 
         return flows, init_stores - stores
