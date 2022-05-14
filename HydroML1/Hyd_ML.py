@@ -1491,15 +1491,17 @@ def load_network(load_decoder, load_encoder, dataset_properties, model_load_path
     #    pickle.dump(encoder_properties, outp)
     with open(encoder_properties_load_path, 'rb') as input:
         encoder_properties = pickle.load(input)
+        if not hasattr(encoder_properties, 'pretrain'):
+            encoder_properties.pretrain = False
 
     decoder_properties = DecoderProperties()
     #with open(decoder_properties_load_path, 'wb') as outp:
     #    pickle.dump(decoder_properties, outp)
     with open(decoder_properties_load_path, 'rb') as input:
         decoder_properties = pickle.load(input)
+        if not hasattr(decoder_properties.hyd_model_net_props, 'weight_stores'):
+            decoder_properties.hyd_model_net_props.weight_stores = 0.001
 
-
-    decoder_properties = DecoderProperties()
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
