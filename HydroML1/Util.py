@@ -111,13 +111,19 @@ class EncoderProperties:
         self.encoder_names = ["prcp(mm/day)", "tmax(C)"]  # "swe(mm)",'flow(cfs)',
         self.flow_normalizer = 1  # 0.1 is too low...
 
-        self.encoding_num_layers = 2
+        self.encoding_num_layers = 3
         self.encoding_hidden_dim = 32
+        self.kernel_size = 9
+        self.conv_stride = 1
+        self.mp_stride = 4
         self.encode_attributes = True
         self.encode_signatures = True
         self.encode_hydro_met_data = True
         self.pretrain = False
+        self.dropout_indices = []
 
+        expected_encodings_per_year = 365/pow(self.conv_stride * self.mp_stride, self.encoding_num_layers)
+        print(f"{expected_encodings_per_year=}")
 
     def get_activation(self):
         #torch.nn.Sigmoid()

@@ -1,3 +1,5 @@
+import shutil
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -14,7 +16,7 @@ import shapefile as shp
 import pickle
 from scipy import stats
 
-plotting_freq = 1
+plotting_freq = 0
 batch_size = 128
 
 def savefig(name, plt):
@@ -115,7 +117,8 @@ def load_inputs(subsample_data, batch_size, load_train, load_validate, load_test
 
 
 
-def moving_average(a, n=451):
+def moving_average(a, i=100):
+    n = max(len(a) // i, 1)
     ret = np.cumsum(a, dtype=float)
     ret[n:] = ret[n:] - ret[:-n]
     return ret[n - 1:] / n
@@ -126,19 +129,24 @@ class ConvEncoder(nn.Module):
         super(ConvEncoder, self).__init__()
 
         self.encoder_properties = encoder_properties
-        self.layer1 = nn.Sequential(
-            nn.Conv1d(encoder_properties.encoder_input_dim(), 32, kernel_size=7, stride=2, padding=5),  # padding is (kernel_size-1)/2?
-            encoder_properties.get_activation(),
-            nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
-        self.layer2 = nn.Sequential(
-            nn.Conv1d(32, 32, kernel_size=7, stride=2, padding=5),
-            encoder_properties.get_activation(),
-            nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
-        self.layer3 = nn.Sequential(
-            nn.Conv1d(32, self.output_dim(), kernel_size=7, stride=2, padding=5),
-            encoder_properties.get_activation(),
-            nn.MaxPool1d(kernel_size=5, stride=2, padding=2))
-        self.layer4 = None
+
+        layers = []
+        for layer in range(encoder_properties.encoding_num_layers):
+            in_dim = encoder_properties.encoder_input_dim() if layer == 0 else encoder_properties.encoding_hidden_dim
+            out_dim = self.output_dim() if layer == encoder_properties.encoding_num_layers-1 \
+                else encoder_properties.encoding_hidden_dim
+            kernel_size = encoder_properties.kernel_size
+            layers.append(nn.Sequential(
+                nn.Conv1d(in_dim, out_dim,
+                          kernel_size=kernel_size,
+                          stride=encoder_properties.conv_stride,
+                          padding=0),
+                encoder_properties.get_activation(),
+                nn.MaxPool1d(kernel_size=kernel_size, stride=encoder_properties.mp_stride, padding=(kernel_size-1)//2)))
+
+        self.layers = nn.Sequential(*layers)
+
+        self.av_layer = None
             # l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
             #self.layer4 = nn.Sequential(
             #nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
@@ -149,17 +157,23 @@ class ConvEncoder(nn.Module):
         return 16
 
     def forward(self, input):
-        out = self.layer1(input)  # (input[0] if type(input) is tuple else input)  # flow_data is b x t x i
-        out = self.layer2(out)
-        out = self.layer3(out)
-        if self.layer4 is None:
-            self.layer4 = nn.Sequential(nn.AvgPool1d(kernel_size=out.shape[2], stride=out.shape[2]), nn.Sigmoid())
-        out = self.layer4(out).reshape(out.size(0), -1)
+        out = self.layers(input)
+
+        if self.av_layer is None:
+            self.av_layer = nn.Sequential(nn.AvgPool1d(kernel_size=out.shape[2], stride=out.shape[2]), nn.Sigmoid())
+        out = self.av_layer(out).reshape(out.size(0), -1)
 
         if self.encoder_properties.pretrain:
             out = self.fc_predict_sigs(out)
 
-        return out
+        if len(self.encoder_properties.dropout_indices) > 0:
+            shift = torch.zeros((1, out.shape[1]))
+            scale = torch.zeros((1, out.shape[1]))+1
+            shift[:, self.encoder_properties.dropout_indices] = 0.5
+            scale[:, self.encoder_properties.dropout_indices] = 0
+            out = out * scale + shift
+
+        return out  # b x e
 
 
 class Encoder(nn.Module):
@@ -642,7 +656,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                        encoder_properties: EncoderProperties, pretrained_encoder_path):
 
     num_epochs = 30
-    learning_rate = 0.001
+    learning_rate = 0.003
     encoder_properties.pretrain = True
 
     shown = False
@@ -1038,13 +1052,15 @@ def check_dataloaders(train_loader, validate_loader):
                 raise Exception(f"{this_gauge_id} != {gauge_id}")
 
 # Expect encoder is pretrained, decoder might be
-def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
+def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
                           model_store_path, ablation_test):
     coupled_learning_rate = 0.01 if ablation_test else 0.001
-    output_epochs = 800
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
+
+    if not os.path.exists(model_store_path):
+        os.mkdir(model_store_path)
 
     # Low weight decay on output layers
     decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
@@ -1062,7 +1078,7 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     optimizer = opt_full
 
     #Should be random initialization
-    if not ablation_test:
+    if not ablation_test and output_epochs > 1:
         test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
     randomize_encoding = False
@@ -1079,18 +1095,22 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
     decoder.weight_stores = 0.001
     er = EpochRunner()
 
-    init_val_nse = er.run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
-                                   decoder_properties, encoder, encoder_properties, [], optimizer,
-                                   validate_plot_idx, randomize_encoding, validate_loader,
-                                   [])
-    print(f'Init median validation NSE = {np.median(init_val_nse):.3f}')
+    init_val_nse = []
+    if output_epochs > 1:
+        er.run_dataloader_epoch(False, val_enc_inputs, criterion, dataset_properties, decoder,
+                                decoder_properties, encoder, encoder_properties, [], optimizer,
+                                validate_plot_idx, randomize_encoding, validate_loader,
+                                [])
+        print(f'Init median validation NSE = {np.median(init_val_nse):.3f}')
+    else:
+        init_val_nse = [-1]
 
     max_val_nse = init_val_nse
 
     loss_list = []
     validate_loss_list = init_val_nse.copy()
     for epoch in range(output_epochs):
-        if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
+        if epoch % 20 == 19 and not ablation_test and plotting_freq > 0:
             encoding_sensitivity(encoder, encoder_properties, dataset_properties, train_enc_inputs)
             if True:
                 model = Object()
@@ -1118,16 +1138,16 @@ def train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encod
 
         print(f'Median validation NSE epoch {epoch}/{output_epochs} = {np.median(val_nse):.3f} training NSE {np.median(train_nse):.3f}')
 
-        if epoch % 10 == 0 and not ablation_test and plotting_freq > 0:
+        if epoch % 20 == 19 and not ablation_test and plotting_freq > 0:
             test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
 
-        if ablation_test:
-            val_median = np.median(val_nse)
-            max_val_median = np.median(max_val_nse)
-            if val_median > max_val_median:
-                max_val_nse = val_nse
-            elif val_median < 0.9*max_val_median and epoch > 10:
-                break
+        #if ablation_test:
+        val_median = np.median(val_nse)
+        max_val_median = np.median(max_val_nse)
+        if val_median > max_val_median:
+            max_val_nse = val_nse
+        elif val_median < 0.9*max_val_median and epoch > 10:
+            break
 
         torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
         torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
@@ -1459,8 +1479,58 @@ def train_test_everything(subsample_data):
                                                                             dataset_properties,
                                                                             model_load_path, batch_size)
 
-    return train_encoder_decoder(train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
-                                 dataset_properties, model_store_path=model_store_path, ablation_test=(subsample_data <= 0))
+    train_encoder_decoder(800, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
+            dataset_properties, model_store_path, (subsample_data <= 0))
+
+
+def reduce_encoding(subsample_data):
+    train_loader, validate_loader, test_loader, dataset_properties \
+        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
+                      load_test=False, encoder_years=1, decoder_years=1)
+
+    model_load_path = 'c:\\hydro\\pytorch_models\\104-e269\\'
+    model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
+    temp_store_path = 'c:\\hydro\\pytorch_models\\temp\\'
+    if not os.path.exists(model_store_path):
+        os.mkdir(model_store_path)
+
+    decoder, decoder_properties, encoder, encoder_properties = load_network(True, True,
+                                                                            dataset_properties,
+                                                                            model_load_path, batch_size)
+
+    encoder_properties.dropout_indices = []
+
+    for iter in range(encoder_properties.encoding_dim(), 0, -1):
+        best_nse = -1
+        best_idx = -1
+        this_model_store_path = model_store_path + f"{iter}\\"
+        next_model_store_path= model_store_path + f"{iter-1}\\"
+        for test_idx in range(encoder_properties.encoding_dim()):
+
+            decoder, decoder_properties, encoder, encoder_properties = load_network(True, True,
+                                                                                    dataset_properties,
+                                                                                    model_load_path if iter == encoder_properties.encoding_dim() else this_model_store_path, batch_size)
+            expected_dropout = iter - encoder_properties.encoding_dim()
+            if len(encoder_properties.dropout_indices) != expected_dropout:
+                raise Exception(f"Expected {expected_dropout} dropout already. Got indices {encoder_properties.dropout_indices=}")
+
+            if test_idx in encoder_properties.dropout_indices:
+                continue
+
+            encoder_properties.dropout_indices.append(test_idx)
+            _, val_nse_err_list = train_encoder_decoder(1, train_loader, validate_loader, encoder, decoder, encoder_properties,
+                                            decoder_properties, dataset_properties, temp_store_path, False)
+            encoder_properties.dropout_indices.pop()
+
+            nse_err = np.median(val_nse_err_list)
+            if nse_err > best_nse:
+                best_nse = nse_err
+                best_idx = test_idx
+                shutil.copytree(temp_store_path, next_model_store_path, dirs_exist_ok=True)
+
+            print(f"{test_idx=} {nse_err=} {best_nse=}")
+
+        encoder_properties.dropout_indices.append(best_idx)
 
 
 def load_network(load_decoder, load_encoder, dataset_properties, model_load_path, batch_size):
@@ -1472,23 +1542,25 @@ def load_network(load_decoder, load_encoder, dataset_properties, model_load_path
     encoder_properties = EncoderProperties()
     #with open(encoder_properties_load_path, 'wb') as outp:
     #    pickle.dump(encoder_properties, outp)
-    with open(encoder_properties_load_path, 'rb') as input:
-        encoder_properties = pickle.load(input)
-        if not hasattr(encoder_properties, 'pretrain'):
-            encoder_properties.pretrain = False
+    if load_encoder:
+        with open(encoder_properties_load_path, 'rb') as input:
+            encoder_properties = pickle.load(input)
+            if not hasattr(encoder_properties, 'pretrain'):
+                encoder_properties.pretrain = False
 
     decoder_properties = DecoderProperties()
     #with open(decoder_properties_load_path, 'wb') as outp:
     #    pickle.dump(decoder_properties, outp)
-    with open(decoder_properties_load_path, 'rb') as input:
-        decoder_properties = pickle.load(input)
-        if not hasattr(decoder_properties.hyd_model_net_props, 'weight_stores'):
-            decoder_properties.hyd_model_net_props.weight_stores = 0.001
+    if load_decoder:
+        with open(decoder_properties_load_path, 'rb') as input:
+            decoder_properties = pickle.load(input)
+            if not hasattr(decoder_properties.hyd_model_net_props, 'weight_stores'):
+                decoder_properties.hyd_model_net_props.weight_stores = 0.001
 
     encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties)
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
-        encoder.layer4 = None  # recreate this on-the-fly to match the amount of input
+        encoder.hydro_met_encoder.av_layer = None  # recreate this on-the-fly to match the amount of input
     if load_decoder:
         decoder.load_state_dict(torch.load(decoder_load_path))
     return decoder, decoder_properties, encoder, encoder_properties
@@ -1580,11 +1652,12 @@ def can_encoder_learn_sigs(subsample_data):
     train_encoder_only(encoder, dataset_train, dataset_validate, dataset_properties, encoder_properties, None)
 
 
-torch.manual_seed(0)
+torch.manual_seed(1)
 #do_ablation_test()
-#train_test_everything(50)
+#train_test_everything(1)
+reduce_encoding(20)
 
-can_encoder_learn_sigs(1)
+#can_encoder_learn_sigs(1)
 """
 compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
                    (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
