@@ -426,26 +426,28 @@ def plot_states(ax, sf):
         if stateshape.record.STUSPS in {'AK', 'PR', 'HI', 'GU', 'MP', 'VI', 'AS'}:
             continue
 
-
-        # Only draw the longest part (except MI--draw both parts)
-        longest_part_start = 0
-        longest_part_end = len(stateshape.shape.points)
-
-        if stateshape.record.STUSPS != 'MI':
+        # Only draw the longest part (except MI--draw 2 longest parts)
+        last_long_part = -1
+        num_parts_draw = 2 if stateshape.record.STUSPS == 'MI' else 1
+        for j in range(num_parts_draw):
             num_parts = len(stateshape.shape.parts)
             longest_part_len = 0
             for i in range(num_parts):
+                if i == last_long_part: # Draw longest first, then second longest, etc.
+                    continue
+
                 part_end_idx = stateshape.shape.parts[i+1] if i+1 < num_parts else len(stateshape.shape.points)
                 part_length = part_end_idx - stateshape.shape.parts[i]
                 if part_length > longest_part_len:
                     longest_part_start = stateshape.shape.parts[i]
                     longest_part_len = part_length
                     longest_part_end = part_end_idx
+                    long_part = i
 
-
-        x = [a[0] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
-        y = [a[1] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
-        ax.plot(x, y, 'k')
+            x = [a[0] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
+            y = [a[1] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
+            ax.plot(x, y, 'k')
+            last_long_part = long_part
 
 
 def cat_lat_lons(datapoints, lats, lons):
