@@ -103,6 +103,8 @@ class DatasetProperties:
 
 
 class EncoderProperties:
+    printed = False
+
     def encoder_input_dim(self):
         return len(self.encoder_names)+1  # +1 for flow
 
@@ -122,8 +124,10 @@ class EncoderProperties:
         self.pretrain = False
         self.dropout_indices = []
 
-        expected_encodings_per_year = 365/pow(self.conv_stride * self.mp_stride, self.encoding_num_layers)
-        print(f"{expected_encodings_per_year=}")
+        if not self.printed:
+            expected_encodings_per_year = 365/pow(self.conv_stride * self.mp_stride, self.encoding_num_layers)
+            print(f"{expected_encodings_per_year=}")
+            self.printed = True
 
     def get_activation(self):
         #torch.nn.Sigmoid()

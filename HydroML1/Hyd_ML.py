@@ -1510,7 +1510,7 @@ def reduce_encoding(subsample_data):
             decoder, decoder_properties, encoder, encoder_properties = load_network(True, True,
                                                                                     dataset_properties,
                                                                                     model_load_path if iter == encoder_properties.encoding_dim() else this_model_store_path, batch_size)
-            expected_dropout = iter - encoder_properties.encoding_dim()
+            expected_dropout = encoder_properties.encoding_dim() - iter
             if len(encoder_properties.dropout_indices) != expected_dropout:
                 raise Exception(f"Expected {expected_dropout} dropout already. Got indices {encoder_properties.dropout_indices=}")
 
@@ -1655,7 +1655,7 @@ def can_encoder_learn_sigs(subsample_data):
 torch.manual_seed(1)
 #do_ablation_test()
 #train_test_everything(1)
-reduce_encoding(20)
+reduce_encoding(1)
 
 #can_encoder_learn_sigs(1)
 """
