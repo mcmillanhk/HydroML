@@ -427,16 +427,21 @@ def plot_states(ax, sf):
             continue
 
 
-        # Only draw the longest part
-        num_parts = len(stateshape.shape.parts)
-        longest_part_len = 0
-        for i in range(num_parts):
-            part_end_idx = stateshape.shape.parts[i+1] if i+1 < num_parts else len(stateshape.shape.points)
-            part_length = part_end_idx - stateshape.shape.parts[i]
-            if part_length > longest_part_len:
-                longest_part_start = stateshape.shape.parts[i]
-                longest_part_len = part_length
-                longest_part_end = part_end_idx
+        # Only draw the longest part (except MI--draw both parts)
+        longest_part_start = 0
+        longest_part_end = len(stateshape.shape.points)
+
+        if stateshape.record.STUSPS != 'MI':
+            num_parts = len(stateshape.shape.parts)
+            longest_part_len = 0
+            for i in range(num_parts):
+                part_end_idx = stateshape.shape.parts[i+1] if i+1 < num_parts else len(stateshape.shape.points)
+                part_length = part_end_idx - stateshape.shape.parts[i]
+                if part_length > longest_part_len:
+                    longest_part_start = stateshape.shape.parts[i]
+                    longest_part_len = part_length
+                    longest_part_end = part_end_idx
+
 
         x = [a[0] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
         y = [a[1] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
