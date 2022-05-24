@@ -133,16 +133,20 @@ class ConvEncoder(nn.Module):
         layers = []
         for layer in range(encoder_properties.encoding_num_layers):
             in_dim = encoder_properties.encoder_input_dim() if layer == 0 else encoder_properties.encoding_hidden_dim
-            out_dim = self.output_dim() if layer == encoder_properties.encoding_num_layers-1 \
-                else encoder_properties.encoding_hidden_dim
+            out_dim = encoder_properties.encoding_hidden_dim
             kernel_size = encoder_properties.kernel_size
             layers.append(nn.Sequential(
                 nn.Conv1d(in_dim, out_dim,
                           kernel_size=kernel_size,
                           stride=encoder_properties.conv_stride,
                           padding=0),
-                encoder_properties.get_activation(),
-                nn.MaxPool1d(kernel_size=kernel_size, stride=encoder_properties.mp_stride, padding=(kernel_size-1)//2)))
+                nn.MaxPool1d(kernel_size=kernel_size, stride=encoder_properties.mp_stride, padding=(kernel_size-1)//2),
+                encoder_properties.get_activation()))
+        layers.append(
+            nn.Conv1d(encoder_properties.encoding_hidden_dim, encoder_properties.hydro_encoding_output_dim,
+                      kernel_size=kernel_size,
+                      stride=encoder_properties.conv_stride,
+                      padding=0)) # We'll append avpool and sigmoid after this
 
         self.layers = nn.Sequential(*layers)
 
@@ -150,11 +154,7 @@ class ConvEncoder(nn.Module):
             # l3outputdim = math.floor(((dataset_properties.length_days / 8) / 8))
             #self.layer4 = nn.Sequential(
             #nn.AvgPool1d(kernel_size=l3outputdim, stride=l3outputdim))
-        self.fc_predict_sigs = nn.Linear(self.output_dim(), dataset_properties.num_sigs())
-
-    @staticmethod
-    def output_dim():
-        return 16
+        self.fc_predict_sigs = nn.Linear(encoder_properties.hydro_encoding_output_dim, dataset_properties.num_sigs())
 
     def forward(self, input):
         out = self.layers(input)
@@ -181,7 +181,7 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         self.hydro_met_encoder = ConvEncoder(dataset_properties, encoder_properties) if encoder_properties.encode_hydro_met_data else None
-        cnn_output_dim = self.hydro_met_encoder.output_dim() if self.hydro_met_encoder else 0
+        cnn_output_dim = encoder_properties.hydro_encoding_output_dim if self.hydro_met_encoder else 0
         fixed_attribute_dim = len(encoder_properties.encoding_names(dataset_properties))
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
@@ -1062,7 +1062,7 @@ def check_dataloaders(train_loader, validate_loader):
 def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
                           model_store_path, ablation_test):
-    coupled_learning_rate = 0.01 if ablation_test else 0.001
+    coupled_learning_rate = 0.01 if ablation_test else 0.0003
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
@@ -1661,8 +1661,8 @@ def can_encoder_learn_sigs(subsample_data):
 
 torch.manual_seed(1)
 #do_ablation_test()
-#train_test_everything(1)
-reduce_encoding(1)
+train_test_everything(1)
+#reduce_encoding(1)
 
 #can_encoder_learn_sigs(1)
 """

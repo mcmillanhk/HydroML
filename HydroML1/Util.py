@@ -111,13 +111,14 @@ class EncoderProperties:
     def __init__(self):
         self.encoder_type = EncType.CNNEncoder
         self.encoder_names = ["prcp(mm/day)", "tmax(C)"]  # "swe(mm)",'flow(cfs)',
-        self.flow_normalizer = 1  # 0.1 is too low...
+        self.flow_normalizer = 0.2  # 0.1 is too low...
 
         self.encoding_num_layers = 3
         self.encoding_hidden_dim = 32
+        self.hydro_encoding_output_dim = 16  # intermediate output dim
         self.kernel_size = 9
         self.conv_stride = 1
-        self.mp_stride = 4
+        self.mp_stride = 3
         self.encode_attributes = True
         self.encode_signatures = True
         self.encode_hydro_met_data = True
