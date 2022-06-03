@@ -1486,7 +1486,7 @@ def train_test_everything(subsample_data):
                                                                             dataset_properties,
                                                                             model_load_path, batch_size)
 
-    train_encoder_decoder(800, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
+    train_encoder_decoder(1200, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
             dataset_properties, model_store_path, (subsample_data <= 0))
 
 
