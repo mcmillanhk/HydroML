@@ -94,11 +94,14 @@ class HydModelNet(nn.Module):
 
         for t in range(timesteps):
             if fixed_data is None and type(encoding) != dict:
-                fixed_data = encoding if not self.decoder_properties.decoder_include_fixed \
-                    else torch.cat((torch.tensor(np.array(datapoints.signatures)),
-                                    torch.tensor(np.array(datapoints.attributes)), encoding), 1)
+                fixed_data = torch.cat([e for e in [torch.tensor(np.array(datapoints.signatures))
+                                       if self.decoder_properties.decoder_include_signatures else None,
+                                       torch.tensor(np.array(datapoints.attributes))
+                                       if self.decoder_properties.decoder_include_attributes else None, encoding]
+                                       if e is not None], 1)
             if type(encoding) == dict:
-                if self.decoder_properties.decoder_include_fixed:
+                if self.decoder_properties.decoder_include_signatures or \
+                        self.decoder_properties.decoder_include_attributes:
                     raise Exception("TODO append this")
                 first_encoding = encoding[datapoints.gauge_id_int[0]][0]
                 encoding_dim = len(first_encoding)
@@ -108,7 +111,7 @@ class HydModelNet(nn.Module):
                     fixed_data[b, :] = encoding[datapoints.gauge_id_int[b]][encoding_id, :]
 
             if t == 0:
-                stores = init_stores = self.init_store_layer(fixed_data).exp()
+                stores = init_stores = self.init_store_layer(encoding).exp()
 
             climate_input = datapoints.climate_data[:, t, :]
             if self.decoder_properties.decoder_include_stores:

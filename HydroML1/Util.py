@@ -119,8 +119,8 @@ class EncoderProperties:
         self.kernel_size = 9
         self.conv_stride = 1
         self.mp_stride = 3
-        self.encode_attributes = True
-        self.encode_signatures = True
+        self.encode_attributes = False
+        self.encode_signatures = False
         self.encode_hydro_met_data = True
         self.pretrain = False
         self.dropout_indices = []
@@ -162,11 +162,14 @@ class EncoderProperties:
         return (hyd_data, fixed_data)
 
     def encoding_names(self, dataset_properties: DatasetProperties):
+        lst = []
         attribs = list(dataset_properties.attrib_normalizers.keys())
+        sigs = list(dataset_properties.sig_normalizers.keys())
         if self.encode_signatures:
-            return list(dataset_properties.sig_normalizers.keys()) + attribs
-        else:
-            return attribs
+            lst += sigs
+        elif self.encode_attributes:
+            lst += attribs
+        return lst
 
 
 class DecoderType(Enum):
@@ -185,7 +188,8 @@ class DecoderProperties:
             self.num_layers = 4
             self.flow_between_stores = False  # Allow flow between stores; otherwise they're all connected only to out flow
             self.decoder_include_stores = True
-            self.decoder_include_fixed = False
+            self.decoder_include_signatures = False
+            self.decoder_include_attributes = True
             self.store_dim = 8
             self.weight_stores = 0.001
 
@@ -198,8 +202,10 @@ class DecoderProperties:
 
         def input_dim2(self, dataset_properties: DatasetProperties, encoding_dim: int):
             total_dim = len(dataset_properties.climate_norm) + encoding_dim
-            if self.decoder_include_fixed:
-                total_dim += len(dataset_properties.sig_normalizers) + len(dataset_properties.attrib_normalizers)
+            if self.decoder_include_signatures:
+                total_dim += len(dataset_properties.sig_normalizers)
+            if self.decoder_include_attributes:
+                total_dim += len(dataset_properties.attrib_normalizers)
             if self.decoder_include_stores:
                 total_dim += self.store_dim
             return total_dim
@@ -210,8 +216,8 @@ class DecoderProperties:
             decoder_input_dim = self.input_dim2(dataset_properties, encoding.shape[1])
             num_climate_attribs = datapoints.climate_data.shape[2]
 
-            num_signatures = datapoints.signatures.shape[1] if self.decoder_include_fixed else 0
-            num_attributes = datapoints.attributes.shape[1] if self.decoder_include_fixed else 0
+            num_signatures = datapoints.signatures.shape[1] if self.decoder_include_signatures else 0
+            num_attributes = datapoints.attributes.shape[1] if self.decoder_include_attributes else 0
 
             encoding_dim = encoding.shape[1]
             store_size = stores.shape[1]
@@ -224,8 +230,9 @@ class DecoderProperties:
             decoder_input = torch.empty(time_steps, decoder_input_dim, batch_size, dtype=torch.double).fill_(np.nan)
             decoder_input[:, climate_start_idx:sig_start_idx, :] = datapoints.climate_data.permute(1, 2, 0)
 
-            if self.decoder_include_fixed:
+            if self.decoder_include_signatures:
                 decoder_input[:, sig_start_idx:attrib_start_idx, :] = np.expand_dims(np.transpose(np.array(datapoints.signatures)), 0)
+            if self.decoder_include_attributes:
                 decoder_input[:, attrib_start_idx:encoding_start_idx, :] = np.expand_dims(np.transpose(np.array(datapoints.attributes)), 0)
 
             decoder_input[:, encoding_start_idx:store_start_idx, :] = torch.from_numpy(encoding) # TODO don't do this broadcast
