@@ -280,6 +280,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     max_gauge = ['X'] * encoder_properties.encoding_dim()
     max_vals = np.zeros(encoder_properties.encoding_dim()) - 1000
+    gauge_ids = []
     for data_loader in data_loaders:
         for idx, datapoints in enumerate(data_loader.enc):
             hyd_data = encoder_properties.select_encoder_inputs(
@@ -305,11 +306,17 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
                         max_vals[i] = full_encoding[b, i]
                         max_gauge[i] = datapoints.gauge_id[b]
 
+            gauge_ids += datapoints.gauge_id
+
             lats, lons = cat_lat_lons(datapoints, lats, lons)
 
             #For correlation:
             sig = datapoints.signatures_tensor().detach().numpy()
             sigs = cat(sigs, sig)
+
+    encodings_save = {'gauge_ids': gauge_ids, 'hydro_encodings': hydro_encodings, 'full_encodings': full_encodings }
+    with open(r"C:\hydro\encodings.pkl", "wb") as f:
+        pickle.dump(encodings_save, f)
 
     sf = states()
 
@@ -1474,7 +1481,7 @@ def train_test_everything(subsample_data):
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
     # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\99-Encode-0.001\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\113-E1200\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
@@ -1495,7 +1502,7 @@ def reduce_encoding(subsample_data):
         = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
                       load_test=False, encoder_years=1, decoder_years=1)
 
-    model_load_path = 'c:\\hydro\\pytorch_models\\104-e269\\'
+    model_load_path = 'c:\\hydro\\pytorch_models\\113-E1200\\'
     model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     temp_store_path = 'c:\\hydro\\pytorch_models\\temp\\'
     if not os.path.exists(model_store_path):
@@ -1604,7 +1611,7 @@ def do_ablation_test():
 
 def compare_models(subsample_data, model_load_paths):
     dataset_train, dataset_val, dataset_test, dataset_properties \
-        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=False, load_validate=True, load_test=False,
+        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=True,
                       encoder_years=1, decoder_years=1)
     all_datasets = [dataset_train, dataset_val, dataset_test]
     datasets = []
@@ -1661,12 +1668,13 @@ def can_encoder_learn_sigs(subsample_data):
 
 torch.manual_seed(1)
 #do_ablation_test()
-train_test_everything(1)
+#train_test_everything(1)
 #reduce_encoding(1)
 
 #can_encoder_learn_sigs(1)
-"""
-compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
-                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
-                   (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"), ])
-"""
+
+compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
+
+#compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
+#                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
+#                   (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"), ])

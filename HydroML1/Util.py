@@ -119,7 +119,7 @@ class EncoderProperties:
         self.kernel_size = 9
         self.conv_stride = 1
         self.mp_stride = 3
-        self.encode_attributes = False
+        self.encode_attributes = True
         self.encode_signatures = False
         self.encode_hydro_met_data = True
         self.pretrain = False
@@ -189,7 +189,7 @@ class DecoderProperties:
             self.flow_between_stores = False  # Allow flow between stores; otherwise they're all connected only to out flow
             self.decoder_include_stores = True
             self.decoder_include_signatures = False
-            self.decoder_include_attributes = True
+            self.decoder_include_attributes = False
             self.store_dim = 8
             self.weight_stores = 0.001
 
