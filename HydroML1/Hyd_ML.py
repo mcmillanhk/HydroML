@@ -20,10 +20,11 @@ plotting_freq = 0
 batch_size = 128
 
 def savefig(name, plt):
-    fig_output = r"c:\\hydro\\default3\\"
+    fig_output = r"c:\\hydro\\vector\\"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
-    plt.savefig(fig_output + name + '.png')
+    #Probably raster: plt.savefig(fig_output + name + '.eps')
+    plt.savefig(fig_output + name + '.svg')
 
 # Return 1-nse as we will minimize this
 def nse_loss(output, target):  # both inputs t x b
@@ -160,6 +161,7 @@ class ConvEncoder(nn.Module):
         out = self.layers(input)
 
         if self.av_layer is None:
+            print(f'Actual # encodings over all years: {out.shape[2]}')
             self.av_layer = nn.Sequential(nn.AvgPool1d(kernel_size=out.shape[2], stride=out.shape[2]), nn.Sigmoid())
         out = self.av_layer(out).reshape(out.size(0), -1)
 
@@ -332,22 +334,9 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     print (f"max_vals={max_vals}")
     print (f"max_gauge={max_gauge}")
 
-    sig_names = list(dataset_properties.sig_normalizers.keys()) + extra_sig_names
+    original_sig_names = list(dataset_properties.sig_normalizers.keys()) + extra_sig_names
 
-    new_sig_names = ['q_mean', 'runoff_ratio', 'hfd_mean', 'stream_elas', 'Event_RR', 'EventRR_TotalRR_Ratio',
-                     'RR_seasonality', 'BFI', 'q5', 'low_q_freq', 'low_q_dur', 'zero_q_freq',
-                     'RecessionParametersAlpha', 'RecessionParametersBeta', 'BaseflowRecessionK', 'FirstRecessionSlope',
-                     'MidRecessionSlope',
-                     'Variabillity Index', 'q95', 'high_q_freq', 'high_q_dur', 'IE_effect', 'IE_thresh_signif',
-                     'IE_thresh',
-                     'SE_effect', 'SE_thresh_signif', 'SE_thresh', 'SE_slope', 'Storage_thresh_signif',
-                     'Storage_thresh', ]
-    permutation = [0] * len(new_sig_names)
-    for i, sig_name in enumerate(sig_names):
-        if sig_name in new_sig_names:
-            permutation[new_sig_names.index(sig_name)] = i
-
-    sigs = sigs[:, permutation]
+    new_sig_names, sigs = permute_sigs(original_sig_names, sigs)
 
     for encodings, label in [(full_encodings, "Full encodings"), (hydro_encodings, "Hydro-met encodings")]:
         if encodings is None:
@@ -356,15 +345,18 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         cols = int(np.sqrt(encodings.shape[1]))
         rows = int(np.ceil(encodings.shape[1]/cols))
         scale = 2.5
-        fig = plt.figure(figsize=((scale*1.2)*rows, scale*cols))
+        fig = plt.figure(figsize=((scale*1.5)*rows, scale*cols))
 
         for i in range(encodings.shape[1]):
             ax = fig.add_subplot(cols, rows, i+1)
 
             plot_states(ax, sf)
 
+            ax.axes.xaxis.set_ticklabels([])
+            ax.axes.yaxis.set_ticklabels([])
+
             encodingvec = encodings[:, i]
-            colorplot_latlong(ax, encodingvec, f'{label} {i}', lats, lons, False, 5)
+            colorplot_latlong(ax, encodingvec, f'{label} {i+1}', lats, lons, False, 5)
 
         savefig(label, plt)
         plt.show()
@@ -387,22 +379,43 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         print(f"sv: {s}")
 
         print(f"Correlation between {label} and signatures")
-        print_correlations(label, dataset_properties, encodings, sigs, new_sig_names)
+        print_plot_correlations(label, 'signatures', dataset_properties, encodings, sigs, new_sig_names)
+
+        print(f"Correlation between {label} and {label}")
+        print_plot_correlations(label, label, dataset_properties, encodings, encodings,
+                                make_encoding_names(label, encodings.shape[1]))
 
         print(f"Correlation between {label} and attributes")
         attrib_names = list(dataset_properties.attrib_normalizers.keys())
-        print_correlations(label, dataset_properties, encodings, attribs, attrib_names)
+        print_plot_correlations(label, 'CAMELS attributes', dataset_properties, encodings, attribs, attrib_names)
 
         if True:
             C = np.matmul(encodings, vh.transpose())
             print(f"Correlation between principal components of {label} and signatures")
-            print_correlations(label + " (PC)", dataset_properties, C, sigs, new_sig_names)
+            print_plot_correlations(label + " (PC)", 'signatures', dataset_properties, C, sigs, new_sig_names)
 
     #print(f"sv: {s}")
     np.set_printoptions(precision=None, threshold=False)
 
 
-def print_correlations(label, dataset_properties, encodings, sigs, sig_names):
+def permute_sigs(original_sig_names, sigs):
+    new_sig_names = ['q_mean', 'runoff_ratio', 'hfd_mean', 'stream_elas', 'Event_RR', 'EventRR_TotalRR_Ratio',
+                     'RR_seasonality', 'BFI', 'q5', 'low_q_freq', 'low_q_dur', 'zero_q_freq',
+                     'RecessionParametersAlpha', 'RecessionParametersBeta', 'BaseflowRecessionK', 'FirstRecessionSlope',
+                     'MidRecessionSlope',
+                     'Variabillity Index', 'q95', 'high_q_freq', 'high_q_dur', 'IE_effect', 'IE_thresh_signif',
+                     'IE_thresh',
+                     'SE_effect', 'SE_thresh_signif', 'SE_thresh', 'SE_slope', 'Storage_thresh_signif',
+                     'Storage_thresh', ]
+    permutation = [0] * len(new_sig_names)
+    for i, sig_name in enumerate(original_sig_names):
+        if sig_name in new_sig_names:
+            permutation[new_sig_names.index(sig_name)] = i
+    sigs = sigs[:, permutation]
+    return new_sig_names, sigs
+
+
+def print_plot_correlations(label, sig_name, dataset_properties, encodings, sigs, sig_names):
     S = np.corrcoef(encodings, sigs, rowvar=False)
     if False:
         print("Correlation matrix with signatures:")
@@ -414,31 +427,43 @@ def print_correlations(label, dataset_properties, encodings, sigs, sig_names):
         print_corr(correlations, signame, None)
     for enc_idx in range(num_encodings):
         correlations = S[enc_idx, num_encodings:]
-        print_corr(correlations, f"{label}{enc_idx}", sig_names)
+        print_corr(correlations, f"{label}{enc_idx+1}", sig_names)
 
-    fig, ax = plt.subplots(figsize=(20,12))
+    fig, ax = plt.subplots(figsize=(0.6*num_encodings, 0.6*num_sigs))
     S_slice = S[num_encodings:, :num_encodings] # s x e
-    im = ax.imshow(np.abs(S_slice))
+    abs_corrs = np.abs(S_slice)
+    im = ax.imshow(abs_corrs)
 
     # Show all ticks and label them with the respective list entries
     ax.set_yticks(np.arange(num_sigs), labels=sig_names)
-    ax.set_xticks(np.arange(num_encodings), labels=[f"{label}{enc_idx}" for enc_idx in range(num_encodings)])
+    ax.set_xticks(np.arange(num_encodings), labels=make_encoding_names(label, num_encodings))
 
     # Rotate the tick labels and set their alignment.
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
              rotation_mode="anchor")
 
     # Loop over data dimensions and create text annotations.
-    for i in range(num_encodings):
-        for j in range(num_sigs):
-            text = ax.text(i, j, f"{S_slice[j, i]:.2f}",
-                           ha="center", va="center", color="w", fontsize="7")
+    if False:
+        for i in range(num_encodings):
+            for j in range(num_sigs):
+                text = ax.text(i, j, f"{S_slice[j, i]:.2f}",
+                               ha="center", va="center", color="w", fontsize="7")
 
-    title = f"Correlation between CAMELS signatures and {label}"
+    title = f"Correlation between {sig_name} and {label}"
+
+    scalarmap = cm.ScalarMappable()
+    scalarmap.set_array(abs_corrs)
+    plt.colorbar(scalarmap, fraction=0.046, pad=0.04)
+
     ax.set_title(title)
     fig.tight_layout()
     savefig(title, plt)
     plt.show()
+
+
+def make_encoding_names(label, num_encodings):
+    return [f"{label}{enc_idx + 1}" for enc_idx in range(num_encodings)]
+
 
 import matplotlib.cm as cm
 def colorplot_latlong(ax, encodingvec, title, lats, lons, add_legend, size=7):
@@ -543,7 +568,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 plot_nse_map(title, res1.lats, res1.lons, res1.nse_err-res2.nse_err)
 
 def plot_nse_map(title, lats, lons, nse_err):
-    fig = plt.figure(figsize=(6, 4))
+    fig = plt.figure(figsize=(7, 4))
     ax = fig.add_subplot(1, 1, 1)
     plot_states(ax, states())
     colorplot_latlong(ax, nse_err, f'{title}\nRange {nse_err.min():.3f} to {nse_err.max():.3f}', lats, lons, True)
@@ -1640,7 +1665,7 @@ def do_ablation_test():
 
 def compare_models(subsample_data, model_load_paths):
     dataset_train, dataset_val, dataset_test, dataset_properties \
-        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=True,
+        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
                       encoder_years=1, decoder_years=1)
     all_datasets = [dataset_train, dataset_val, dataset_test]
     datasets = []
@@ -1697,12 +1722,12 @@ def can_encoder_learn_sigs(subsample_data):
 
 torch.manual_seed(1)
 #do_ablation_test()
-train_test_everything(1)
+#train_test_everything(1)
 #reduce_encoding(1)
 
 #can_encoder_learn_sigs(1)
 
-#compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
+compare_models(10, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
 
 #compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
 #                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),

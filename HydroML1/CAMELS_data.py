@@ -1,6 +1,7 @@
 from __future__ import print_function, division
 import os
 
+import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
 from Util import *
@@ -39,12 +40,14 @@ class CamelsDataset(Dataset):
         self.latlong = self.attrib_files[['gauge_id', 'gauge_lat', 'gauge_lon']]
         self.attrib_files = self.attrib_files[['gauge_id'] + list(dataset_properties.attrib_normalizers.keys())]
 
+        CamelsDataset.remove_nan(self.attrib_files)
+
         for name, normalizer in dataset_properties.attrib_normalizers.items():
             self.attrib_files[name] = self.attrib_files[name].transform(lambda x: x*normalizer)
-            if np.isnan(self.attrib_files[name]).any():
-                median = np.nanmedian(self.attrib_files[name])
-                self.attrib_files[name][np.isnan(self.attrib_files[name])] = median
-                print("Replacing nan with median=" + str(median) + " in " + name)
+            #if np.isnan(self.attrib_files[name]).any():
+            #    median = np.nanmedian(self.attrib_files[name])
+            #    self.attrib_files[name][np.isnan(self.attrib_files[name])] = median
+            #    print("Replacing nan with median=" + str(median) + " in " + name)
 
         col_names = pd.read_csv(csv_file, nrows=0).columns
         types_dict = {'gauge_id': str}
@@ -57,6 +60,7 @@ class CamelsDataset(Dataset):
 
         extra_sigs = [r'C:\hydro\extra_sigs\gw_array.csv', r'C:\hydro\extra_sigs\of_array2.csv']
         self.extra_sigs_files = CamelsDataset.read_attributes(extra_sigs, ',')
+        CamelsDataset.remove_nan(self.extra_sigs_files)
 
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
@@ -106,6 +110,18 @@ class CamelsDataset(Dataset):
             while len(self.all_items) == 0:
                 idx_site = np.random.randint(0, num_sites) if gauge_id is None else (self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].index[0])
                 self.load_one_site(dataset_properties, idx_site, ablation_train, ablation_validate)
+
+    @staticmethod
+    def remove_nan(df):
+        for name in df.columns:
+            if np.isnan(df[name]).any():
+                median = np.nanmedian(df[name])
+                df[name][np.isnan(df[name])] = median
+                print("Replacing nan with median=" + str(median) + " in " + name)
+            if np.isinf(df[name]).any():
+                max_finite = np.nanmax(df[name][np.isfinite(df[name])]) + 1
+                df[name][np.isinf(df[name])] = max_finite
+                print("Replacing inf with max + 1=" + str(max_finite) + " in " + name)
 
     @staticmethod
     def read_attributes(csv_file_attrib, sep):
@@ -222,9 +238,9 @@ class CamelsDataset(Dataset):
         else:
             return self.load_item(idx)
 
-    def check_dataframe(self, hyd_data):
-        if hyd_data.isnull().any().any() or hyd_data.isin([-999]).any().any():
-            raise Exception('nan in hyd data')
+    def check_dataframe(self, df):
+        if df.isnull().any().any() or df.isin([-999, np.NAN, np.inf]).any().any():
+            raise Exception('Bad input: nan/inf/null/-999')
 
     """
     def load_item(self, idx):
@@ -297,11 +313,10 @@ class CamelsDataset(Dataset):
         self.check_dataframe(signatures)
 
         extra_signatures = self.extra_sigs_files.loc[self.extra_sigs_files['gauge_id'] == int(gauge_id)].drop('gauge_id', axis=1)
-        for name in extra_signatures.columns: #TODO apply earlier and to function
-            if np.isnan(extra_signatures[name]).any():
-                median = np.nanmedian(self.extra_sigs_files[name])
-                extra_signatures[name][np.isnan(extra_signatures[name])] = median
-                print("Replacing nan with median=" + str(median) + " in " + name)
+        #for name in extra_signatures.columns: #TODO apply earlier and to function
+        #    if np.isnan(extra_signatures[name]).any():
+        #        raise Exception('Failed to remove nan')
+
         self.check_dataframe(extra_signatures)
 
         latlong = self.latlong.loc[self.latlong['gauge_id'] == float(gauge_id)]
