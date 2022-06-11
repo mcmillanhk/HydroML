@@ -126,7 +126,9 @@ class EncoderProperties:
         self.dropout_indices = []
 
         if not self.printed:
-            expected_encodings_per_year = 365/pow(self.conv_stride * self.mp_stride, self.encoding_num_layers)
+            expected_encodings_per_year = 365  # pow(self.conv_stride * self.mp_stride, self.encoding_num_layers)
+            for l in range(self.encoding_num_layers):
+                expected_encodings_per_year = (expected_encodings_per_year//self.conv_stride)//self.mp_stride
             print(f"{expected_encodings_per_year=}")
             self.printed = True
 

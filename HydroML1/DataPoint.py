@@ -5,7 +5,8 @@ import torch
 
 
 class DataPoint:
-    def __init__(self, gauge_id, flow_data, flow_data_cols, climate_data, climate_data_cols, signatures, attributes, latlong):
+    def __init__(self, gauge_id, flow_data, flow_data_cols, climate_data, climate_data_cols, signatures,
+                 extra_signatures, attributes, latlong):
         self.gauge_id: List[str] = gauge_id
 
         #Maybe flow/climate should stay as dataframes? Actually tensors make more sense for all input...
@@ -14,6 +15,7 @@ class DataPoint:
         self.climate_data: torch.tensor = climate_data
         self.climate_data_cols: List[str] = climate_data_cols
         self.signatures: pd.DataFrame = signatures
+        self.extra_signatures: pd.DataFrame = extra_signatures
         self.attributes: pd.DataFrame = attributes
         self.latlong: pd.DataFrame = latlong
         if type(gauge_id) == str:
@@ -46,6 +48,7 @@ def collate_fn(datapoints: List[DataPoint]):
                      torch.stack([d.climate_data for d in datapoints], dim=0), #np.dstack(...),
                      datapoints[0].climate_data_cols,
                      pd.concat([d.signatures for d in datapoints], keys=keys),
+                     pd.concat([d.extra_signatures for d in datapoints], keys=keys),
                      pd.concat([d.attributes for d in datapoints], keys=keys),
                      pd.concat([d.latlong for d in datapoints], keys=keys))
 

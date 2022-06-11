@@ -32,19 +32,10 @@ class CamelsDataset(Dataset):
         self.normalize_inputs = False
         self.normalize_outputs = False
 
-        self.attrib_files = None
-
         csv_file_attrib = [os.path.join(root_dir_signatures, 'camels_' + s + '.txt') for s in
                            ['soil', 'topo', 'vege', 'geol']]
-        for file in csv_file_attrib:
-            attrib_file = pd.read_csv(file, sep=';')
-            print('Loaded columns ' + str(attrib_file.columns) + ' from ' + file)
-            # Could do some labels-to-1-hot
-            if self.attrib_files is None:
-                self.attrib_files = attrib_file
-            else:
-                self.attrib_files = pd.merge(left=self.attrib_files, right=attrib_file, left_on='gauge_id',
-                                             right_on='gauge_id')
+
+        self.attrib_files = CamelsDataset.read_attributes(csv_file_attrib, ';')
         self.latlong = self.attrib_files[['gauge_id', 'gauge_lat', 'gauge_lon']]
         self.attrib_files = self.attrib_files[['gauge_id'] + list(dataset_properties.attrib_normalizers.keys())]
 
@@ -63,6 +54,9 @@ class CamelsDataset(Dataset):
         num_sites_init = len(self.signatures_frame)
         self.signatures_frame.drop('slope_fdc', axis=1, inplace=True)
         self.signatures_frame.dropna(inplace=True)
+
+        extra_sigs = [r'C:\hydro\extra_sigs\gw_array.csv', r'C:\hydro\extra_sigs\of_array2.csv']
+        self.extra_sigs_files = CamelsDataset.read_attributes(extra_sigs, ',')
 
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
@@ -112,6 +106,20 @@ class CamelsDataset(Dataset):
             while len(self.all_items) == 0:
                 idx_site = np.random.randint(0, num_sites) if gauge_id is None else (self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].index[0])
                 self.load_one_site(dataset_properties, idx_site, ablation_train, ablation_validate)
+
+    @staticmethod
+    def read_attributes(csv_file_attrib, sep):
+        combined_attrib_file=None
+        for file in csv_file_attrib:
+            attrib_file = pd.read_csv(file, sep=sep)
+            print('Loaded columns ' + str(attrib_file.columns) + ' from ' + file)
+            # Could do some labels-to-1-hot
+            if combined_attrib_file is None:
+                combined_attrib_file = attrib_file
+            else:
+                combined_attrib_file = pd.merge(left=combined_attrib_file, right=attrib_file, left_on='gauge_id',
+                                             right_on='gauge_id')
+        return combined_attrib_file
 
     def load_one_site(self, dataset_properties, idx_site, ablation_train=False, ablation_validate=False):
         """Read in climate and flow data for this site"""
@@ -288,11 +296,19 @@ class CamelsDataset(Dataset):
         signatures = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].drop('gauge_id', axis=1)
         self.check_dataframe(signatures)
 
+        extra_signatures = self.extra_sigs_files.loc[self.extra_sigs_files['gauge_id'] == int(gauge_id)].drop('gauge_id', axis=1)
+        for name in extra_signatures.columns: #TODO apply earlier and to function
+            if np.isnan(extra_signatures[name]).any():
+                median = np.nanmedian(self.extra_sigs_files[name])
+                extra_signatures[name][np.isnan(extra_signatures[name])] = median
+                print("Replacing nan with median=" + str(median) + " in " + name)
+        self.check_dataframe(extra_signatures)
+
         latlong = self.latlong.loc[self.latlong['gauge_id'] == float(gauge_id)]
 
 
         return DataPoint(gauge_id+'-'+str(flow_date_start), torch.tensor(flow_data.values), flow_data.columns.tolist(),
-                         torch.tensor(climate_data.values), climate_data.columns.tolist(), signatures,
+                         torch.tensor(climate_data.values), climate_data.columns.tolist(), signatures, extra_signatures,
                          attribs, latlong)
 
     def load_flow_climate_csv(self, gauge_id):

@@ -20,7 +20,7 @@ plotting_freq = 0
 batch_size = 128
 
 def savefig(name, plt):
-    fig_output = r"c:\\hydro\\default\\"
+    fig_output = r"c:\\hydro\\default3\\"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
     plt.savefig(fig_output + name + '.png')
@@ -277,6 +277,8 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     lons = None
 
     sigs = None
+    attribs = None
+    extra_sig_names = None
 
     max_gauge = ['X'] * encoder_properties.encoding_dim()
     max_vals = np.zeros(encoder_properties.encoding_dim()) - 1000
@@ -311,8 +313,15 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
             lats, lons = cat_lat_lons(datapoints, lats, lons)
 
             #For correlation:
-            sig = datapoints.signatures_tensor().detach().numpy()
+            sig = np.concatenate((datapoints.signatures_tensor().numpy(), np.array(datapoints.extra_signatures)), axis=1)
             sigs = cat(sigs, sig)
+
+            attrib = np.array(datapoints.attributes)
+            attribs = cat(attribs, attrib)
+
+            if extra_sig_names is None:
+                extra_sig_names = datapoints.extra_signatures.columns.tolist()
+
 
     encodings_save = {'gauge_ids': gauge_ids, 'hydro_encodings': hydro_encodings, 'full_encodings': full_encodings }
     with open(r"C:\hydro\encodings.pkl", "wb") as f:
@@ -322,6 +331,23 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     print (f"max_vals={max_vals}")
     print (f"max_gauge={max_gauge}")
+
+    sig_names = list(dataset_properties.sig_normalizers.keys()) + extra_sig_names
+
+    new_sig_names = ['q_mean', 'runoff_ratio', 'hfd_mean', 'stream_elas', 'Event_RR', 'EventRR_TotalRR_Ratio',
+                     'RR_seasonality', 'BFI', 'q5', 'low_q_freq', 'low_q_dur', 'zero_q_freq',
+                     'RecessionParametersAlpha', 'RecessionParametersBeta', 'BaseflowRecessionK', 'FirstRecessionSlope',
+                     'MidRecessionSlope',
+                     'Variabillity Index', 'q95', 'high_q_freq', 'high_q_dur', 'IE_effect', 'IE_thresh_signif',
+                     'IE_thresh',
+                     'SE_effect', 'SE_thresh_signif', 'SE_thresh', 'SE_slope', 'Storage_thresh_signif',
+                     'Storage_thresh', ]
+    permutation = [0] * len(new_sig_names)
+    for i, sig_name in enumerate(sig_names):
+        if sig_name in new_sig_names:
+            permutation[new_sig_names.index(sig_name)] = i
+
+    sigs = sigs[:, permutation]
 
     for encodings, label in [(full_encodings, "Full encodings"), (hydro_encodings, "Hydro-met encodings")]:
         if encodings is None:
@@ -343,7 +369,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         savefig(label, plt)
         plt.show()
 
-        rank = True
+        rank = False
         M = stats.spearmanr(encodings).correlation if rank else np.corrcoef(encodings, rowvar=False)
         M = np.nan_to_num(M)
         np.set_printoptions(precision=3, threshold=1000, linewidth=250)
@@ -361,33 +387,36 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         print(f"sv: {s}")
 
         print(f"Correlation between {label} and signatures")
-        print_correlations(label, dataset_properties, encodings, sigs)
+        print_correlations(label, dataset_properties, encodings, sigs, new_sig_names)
+
+        print(f"Correlation between {label} and attributes")
+        attrib_names = list(dataset_properties.attrib_normalizers.keys())
+        print_correlations(label, dataset_properties, encodings, attribs, attrib_names)
 
         if True:
             C = np.matmul(encodings, vh.transpose())
             print(f"Correlation between principal components of {label} and signatures")
-            print_correlations(label + " (PC)", dataset_properties, C, sigs)
+            print_correlations(label + " (PC)", dataset_properties, C, sigs, new_sig_names)
 
     #print(f"sv: {s}")
     np.set_printoptions(precision=None, threshold=False)
 
 
-def print_correlations(label, dataset_properties, encodings, sigs):
+def print_correlations(label, dataset_properties, encodings, sigs, sig_names):
     S = np.corrcoef(encodings, sigs, rowvar=False)
     if False:
         print("Correlation matrix with signatures:")
         print(S)
     num_encodings = encodings.shape[1]
-    sig_names = dataset_properties.sig_normalizers.keys()
     num_sigs = len(sig_names)
     for idx, signame in zip(range(num_sigs), sig_names):
         correlations = S[num_encodings + idx, :num_encodings]
         print_corr(correlations, signame, None)
     for enc_idx in range(num_encodings):
         correlations = S[enc_idx, num_encodings:]
-        print_corr(correlations, f"{label}{enc_idx}", dataset_properties.sig_normalizers)
+        print_corr(correlations, f"{label}{enc_idx}", sig_names)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(20,12))
     S_slice = S[num_encodings:, :num_encodings] # s x e
     im = ax.imshow(np.abs(S_slice))
 
@@ -529,7 +558,7 @@ def print_corr(correlations, signame, enc_names):
     for k in reversed(sorted(kv.keys())):
         if k < 0.05:
             break
-        s = s + f"{kv[k] if enc_names is None else list(enc_names.keys())[kv[k]]}({k}) "
+        s = s + f"{kv[k] if enc_names is None else enc_names[kv[k]]}({k}) "
     print(s)
     return s
 
@@ -1668,12 +1697,12 @@ def can_encoder_learn_sigs(subsample_data):
 
 torch.manual_seed(1)
 #do_ablation_test()
-#train_test_everything(1)
+train_test_everything(1)
 #reduce_encoding(1)
 
 #can_encoder_learn_sigs(1)
 
-compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
+#compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
 
 #compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
 #                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
