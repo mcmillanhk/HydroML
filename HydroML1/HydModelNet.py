@@ -31,6 +31,8 @@ class HydModelNet(nn.Module):
         self.storelog = None
         self.petlog = None
 
+        self.log_ab = False
+
     def make_flow_net(self, num_layers, input_dim, hidden_dim):
         layers = []
         for i in range(num_layers):
@@ -86,6 +88,10 @@ class HydModelNet(nn.Module):
         self.outflowlog = np.zeros((timesteps, self.store_outflow_dim))
         self.storelog = np.zeros((timesteps, num_stores))
         self.petlog = np.zeros((timesteps, 1))
+        if self.log_ab:
+            self.log_a = np.zeros((batch_size, timesteps, num_stores))
+            self.log_b = np.zeros((batch_size, timesteps, num_stores))
+            self.log_temp = self.dataset_properties.temperatures(datapoints).transpose((0, 2, 1))
 
         fixed_data = None
         init_stores = None
@@ -173,6 +179,10 @@ class HydModelNet(nn.Module):
 
             self.storelog[t, :] = stores[0, :].detach()
             self.petlog[t, :] = et[0].detach()
+
+            if self.log_ab:
+                self.log_a[:, t, :] = a.detach()
+                self.log_b[:, t, :] = b.detach()
 
         if error_check:
             if flows.min() < 0:

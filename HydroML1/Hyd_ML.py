@@ -1,6 +1,7 @@
 import shutil
 
 import numpy as np
+import scipy as sp
 import torch
 from torch.utils.data import DataLoader
 import CAMELS_data as Cd
@@ -533,6 +534,9 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
         res.lats = None
         res.lons = None
 
+        res.log_a = []
+        res.log_b = []
+        res.log_temp = []
 
     for data_loader in data_loaders:
         for model in models:
@@ -541,9 +545,8 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
             for model in models:
                 res = results[model.name]
 
-                #hyd_data = model.encoder_properties.select_encoder_inputs(
-                #    datapoints, dataset_properties)  # t x i x b
-                #
+                model.decoder.log_ab = True
+
                 all_enc = one_encoding_per_run(datapoints.gauge_id_int, model.encoder, model.encoder_properties, dataset_properties,
                                                res.enc_inputs)
 
@@ -555,9 +558,15 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 res.nse_err = cat(res.nse_err, loss)
                 res.lats, res.lons = cat_lat_lons(datapoints, res.lats, res.lons)
 
+                res.log_a += [model.decoder.log_a]
+                res.log_b += [model.decoder.log_b]
+                res.log_temp += [model.decoder.log_temp]
+
+
     for model in models:
         res = results[model.name]
         plot_nse_map(f"{model.name} NSE", res.lats, res.lons, res.nse_err)
+        classify_stores(model.name, res.log_a, res.log_b, res.log_temp)
 
     for model1 in models:
         for model2 in models:
@@ -566,6 +575,80 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 res1 = results[model1.name]
                 res2 = results[model2.name]
                 plot_nse_map(title, res1.lats, res1.lons, res1.nse_err-res2.nse_err)
+
+
+def classify_stores(name, log_a, log_b, log_temp):
+    a = torch.tensor(np.concatenate(log_a))  # b x t x s
+    b = torch.tensor(np.concatenate(log_b))
+    temp = torch.tensor(np.concatenate(log_temp))
+
+    num_datapoints = a.shape[0]
+    num_timesteps = a.shape[1]
+    num_stores = a.shape[2]
+    total_samples = num_datapoints*num_timesteps
+    cc = np.zeros((num_datapoints, num_stores))
+
+    # Day of year where a or b is maximum
+    a_max = np.zeros((num_datapoints, num_stores))
+    b_max = np.zeros((num_datapoints, num_stores))
+    start=0
+
+    for ba,bb,bt in zip(log_a, log_b, log_temp):
+        ba_filtered = sp.ndimage.gaussian_filter1d(ba, 5, axis=1)
+        bb_filtered = sp.ndimage.gaussian_filter1d(bb, 5, axis=1)
+        for batch_idx in range(ba.shape[0]):
+            for s in range(num_stores):
+                cc[start, s] = np.corrcoef(np.concatenate((np.expand_dims(ba[batch_idx, :, s], axis=0),
+                    np.expand_dims(bt[batch_idx, :, 0], axis=0))))[1,0]
+                a_max[start, s] = np.argmax(ba_filtered[batch_idx, :, s])
+                b_max[start, s] = np.argmax(bb_filtered[batch_idx, :, s])
+            start += 1
+
+
+
+    subset = random.sample(range(total_samples), 500)
+    reduced_subset = [s // num_timesteps for s in subset]
+    a_subset = a.view((total_samples, num_stores))[subset]
+    b_subset = b.view((total_samples, num_stores))[subset]
+    temp_subset = temp[:,:,0].reshape(total_samples)[subset]
+    cc_subset = cc[reduced_subset, :]
+    a_max_subset = a_max[reduced_subset, :]
+    b_max_subset = b_max[reduced_subset, :]
+
+    fig = plt.figure(figsize=(16, 12))
+    scatter_ab(fig, 1, a_subset, 'a', b_subset, 'b')
+    scatter_ab(fig, 2, a_subset, 'a', temp_subset, 'temperature')
+    scatter_ab(fig, 3, b_subset, 'b', temp_subset, 'temperature')
+    scatter_ab(fig, 4, a_subset, 'a', cc_subset, 'b-temp correlation')
+    scatter_ab(fig, 5, b_subset, 'b', cc_subset, 'b-temp correlation')
+    scatter_ab(fig, 6, a_subset, 'a', a_max_subset, 'Day of max(a)')
+    scatter_ab(fig, 7, b_subset, 'b', b_max_subset, 'Day of max(b)')
+    scatter_ab(fig, 8, a_max_subset, 'Day of max(a)', b_max_subset, 'Day of max(b)')
+    scatter_ab(fig, 9, a_max_subset, 'Day of max(a)', b_subset, 'b')
+    scatter_ab(fig, 10, a_max_subset, 'Day of max(a)', b_subset+0.001, 'log(b)', logy=True)
+
+    fig.tight_layout()
+    plt.legend(range(1,num_stores+1), bbox_to_anchor=(1.04,1), loc="upper left")
+    savefig(name + '-ab', plt)
+    plt.show()
+
+
+def scatter_ab(fig, idx, a, aname, b, bname, logy=False):
+    num_stores = a.shape[1]
+    colors = plt.cm.jet(np.linspace(0, 1, num_stores))
+    ax = fig.add_subplot(3, 4, idx)
+
+    y = b
+    if logy:
+        y += 0.001
+
+    for s in range(num_stores):
+        ax.scatter(a[:, s], y if len(y.shape) == 1 else y[:, s], color=colors[s], s=3)
+        ax.set_xlabel(aname)
+        ax.set_ylabel(bname)
+        if logy:
+            ax.set_yscale('log')
+
 
 def plot_nse_map(title, lats, lons, nse_err):
     fig = plt.figure(figsize=(7, 4))
