@@ -193,12 +193,17 @@ class Encoder(nn.Module):
                                  nn.Sigmoid()) # , nn.Dropout(dropout_rate))
 
         self.encoder_properties = encoder_properties
+        self.perturbation = None
 
     def forward(self, x):
         (flow_data, attribs) = x
         hydro_met_encoding = None
         if self.encoder_properties.encode_hydro_met_data:
             out = self.hydro_met_encoder.forward(flow_data)
+
+            if self.perturbation is not None and self.perturbation[0] == Encoding.HydroMet:
+                self.perturb(out)
+
             hydro_met_encoding = out.clone().detach()
 
             if self.encoder_properties.encode_attributes:
@@ -209,9 +214,14 @@ class Encoder(nn.Module):
         # out = self.drop_out(out)
         out = self.fc1(out)
         out = self.fc2(out)
+
+        if self.perturbation is not None and self.perturbation[0] == Encoding.Full:
+            self.perturb(out)
+
         return out, hydro_met_encoding  # both b x e
 
-
+    def perturb(self, out):
+        out[:, self.perturbation[1]] += 0.1
 
 
 class SimpleLSTM(nn.Module):
@@ -343,8 +353,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         if encodings is None:
             continue
 
-        cols = int(np.sqrt(encodings.shape[1]))
-        rows = int(np.ceil(encodings.shape[1]/cols))
+        cols, rows = encoding_fig_layout(encodings.shape[1])
         scale = 2.5
         fig = plt.figure(figsize=((scale*1.5)*rows, scale*cols))
 
@@ -397,6 +406,12 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
 
     #print(f"sv: {s}")
     np.set_printoptions(precision=None, threshold=False)
+
+
+def encoding_fig_layout(num_encodings):
+    cols = int(np.sqrt(num_encodings))
+    rows = int(np.ceil(num_encodings / cols))
+    return cols, rows
 
 
 def permute_sigs(original_sig_names, sigs):
@@ -520,6 +535,77 @@ def cat_lat_lons(datapoints, lats, lons):
 class Object(object):
     pass
 
+def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[Object], dataset_properties: DatasetProperties):
+    for data_loader in data_loaders:
+        for model in models:
+            results[model.name].enc_inputs = all_encoder_inputs(data_loader, model.encoder_properties, dataset_properties)
+        for idx, datapoints in enumerate(data_loader.dec):
+            for model in models:
+                res = results[model.name]
+
+                all_enc = one_encoding_per_run(datapoints.gauge_id_int, model.encoder, model.encoder_properties,
+                                               dataset_properties,
+                                               res.enc_inputs)
+                outputs_ref, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
+                                                 model.decoder_properties, dataset_properties, all_enc)
+                flow_ref = datapoints.flow_data
+                log_a_ref = model.decoder.log_a
+                log_b_ref = model.decoder.log_b
+                for encoding_name, encoding_id in [('Full encoding', Encoding.Full), ('Hydro-met encoding', Encoding.HydroMet)]:
+                    num_encodings = model.encoder_properties.encoding_dim()
+                    cols, rows = encoding_fig_layout(num_encodings)
+                    num_stores = log_a_ref.shape[2]
+                    log_a_perturbed = [None]*num_encodings
+                    log_b_perturbed = [None]*num_encodings
+
+                    for encoding_idx in range(num_encodings):
+                        model.decoder.log_ab = True
+                        model.encoder.perturbation = (encoding_id, encoding_idx)
+                        all_enc_perturbed = one_encoding_per_run(datapoints.gauge_id_int, model.encoder, model.encoder_properties, dataset_properties,
+                                                                 res.enc_inputs)
+                        outputs_perturbed, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
+                                                                   model.decoder_properties, dataset_properties, all_enc_perturbed)
+                        log_a_perturbed[encoding_idx] = model.decoder.log_a
+                        log_b_perturbed[encoding_idx] = model.decoder.log_b
+
+                        model.encoder.perturbation = None
+
+                    colors = plt.cm.jet(np.linspace(0, 1, num_stores))
+                    for plot_bars in [True, False]:
+                        for plot_one in ([False] if plot_bars else [True, False]):
+                            for data_perturbed, data_ref, label in [(log_a_perturbed, log_a_ref, 'a'), (log_b_perturbed, log_b_ref, 'b')]:
+                                fig = plt.figure(figsize=(2 * rows, 2 * cols))
+                                title = encoding_name + ' ' + label + ' ' + ('0' if plot_one else '(average across catchments)')
+                                fig.suptitle(title)
+
+                                for encoding_idx in range(num_encodings):
+                                    if plot_one:
+                                        data_av = data_perturbed[encoding_idx][0, :, :] - data_ref[0, :, :]
+                                    else:
+                                        data_av = np.mean(data_perturbed[encoding_idx] - data_ref, axis=0)
+
+                                    ax = fig.add_subplot(rows, cols, encoding_idx+1)
+                                    for s in range(num_stores):
+                                        if plot_bars:
+                                            ax.bar(range(1, num_stores+1), np.mean(data_av, axis=0), color=colors)
+                                        else:
+                                            ax.plot(data_av[:, s], color=colors[s], linewidth=0.75)
+                                            if encoding_idx < (rows-1)*cols:
+                                                ax.axes.xaxis.set_ticklabels([])
+                                            else:
+                                                ax.set_xlabel('Day of hydro. year')
+                                        ax.set_title(f'Encoding {encoding_idx+1}')
+
+                                        #ax.axes.yaxis.set_ticklabels([])
+
+                                fig.tight_layout()
+                                plt.legend(range(1, num_stores + 1), bbox_to_anchor=(1.04, 1), loc="upper left")
+                                savefig(title + ('-Bars' if plot_bars else '-overTime'), plt)
+                                plt.show()
+
+        return  # One batch of datapoints is enough
+
+
 def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object], dataset_properties: DatasetProperties):
     for model in models:
         model.encoder.eval()
@@ -552,8 +638,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
 
                 outputs, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
                                               model.decoder_properties, dataset_properties, all_enc)
-                flow = datapoints.flow_data  #.squeeze(2).transpose(0,1)  # t x b
-                #loss, _ = nse_loss(outputs, flow) # both inputs should be t x b
+                flow = datapoints.flow_data
                 loss, _ = compute_loss(nse_loss, flow, outputs)
                 res.nse_err = cat(res.nse_err, loss)
                 res.lats, res.lons = cat_lat_lons(datapoints, res.lats, res.lons)
@@ -576,11 +661,13 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 res2 = results[model2.name]
                 plot_nse_map(title, res1.lats, res1.lons, res1.nse_err-res2.nse_err)
 
+    test_encoding_effect(results, data_loaders, models, dataset_properties)
+
 
 def classify_stores(name, log_a, log_b, log_temp):
-    a = torch.tensor(np.concatenate(log_a))  # b x t x s
-    b = torch.tensor(np.concatenate(log_b))
-    temp = torch.tensor(np.concatenate(log_temp))
+    a = np.concatenate(log_a)  # b x t x s
+    b = np.concatenate(log_b)
+    temp = np.concatenate(log_temp)
 
     num_datapoints = a.shape[0]
     num_timesteps = a.shape[1]
@@ -602,14 +689,13 @@ def classify_stores(name, log_a, log_b, log_temp):
                     np.expand_dims(bt[batch_idx, :, 0], axis=0))))[1,0]
                 a_max[start, s] = np.argmax(ba_filtered[batch_idx, :, s])
                 b_max[start, s] = np.argmax(bb_filtered[batch_idx, :, s])
+                # There are peaks at 0 and num_timesteps because of a dependency on something with a trend, e.g. store
             start += 1
-
-
 
     subset = random.sample(range(total_samples), 500)
     reduced_subset = [s // num_timesteps for s in subset]
-    a_subset = a.view((total_samples, num_stores))[subset]
-    b_subset = b.view((total_samples, num_stores))[subset]
+    a_subset = a.reshape((total_samples, num_stores))[subset]
+    b_subset = b.reshape((total_samples, num_stores))[subset]
     temp_subset = temp[:,:,0].reshape(total_samples)[subset]
     cc_subset = cc[reduced_subset, :]
     a_max_subset = a_max[reduced_subset, :]
@@ -631,6 +717,26 @@ def classify_stores(name, log_a, log_b, log_temp):
     plt.legend(range(1,num_stores+1), bbox_to_anchor=(1.04,1), loc="upper left")
     savefig(name + '-ab', plt)
     plt.show()
+
+    a_average = np.mean(a, axis=0)
+    b_average = np.mean(b, axis=0)
+    a_median = np.median(a, axis=0)
+    b_median = np.median(b, axis=0)
+
+    fig_av = plt.figure(figsize=(8, 8))
+    colors = plt.cm.jet(np.linspace(0, 1, num_stores))
+    for series, label, idx in [(a_average, 'Mean a', 1), (b_average, 'Mean b', 2),
+                               (a_median, 'Median a', 3), (b_median, 'Median b', 4)]:
+        ax = fig_av.add_subplot(2, 2, idx)
+        for s in range(num_stores):
+            ax.plot(series[:,s], color=colors[s])
+            ax.set_xlabel('Day of hydro. year')
+            ax.set_ylabel(label)
+
+    plt.legend(range(1,num_stores+1), bbox_to_anchor=(1.04,1), loc="upper left")
+    savefig(name + '-annualTrend', plt)
+    plt.show()
+
 
 
 def scatter_ab(fig, idx, a, aname, b, bname, logy=False):
@@ -719,7 +825,7 @@ def all_encodings(datapoint: DataPoint, encoder: nn.Module, encoder_properties: 
 # Return a tensor with one random encoding per batch item
 def one_encoding_per_run(gauge_id_int, encoder: nn.Module, encoder_properties: EncoderProperties,
                          dataset_properties: DatasetProperties, all_enc_inputs):
-    encoder.train()
+    encoder.train() #TODO should not usually be needed
     first_enc_input = list(all_enc_inputs.values())[0]
     encoder_inputs = None
     batch_size = len(gauge_id_int)
@@ -1810,7 +1916,7 @@ torch.manual_seed(1)
 
 #can_encoder_learn_sigs(1)
 
-compare_models(10, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
+compare_models(40, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
 
 #compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
 #                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),

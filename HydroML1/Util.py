@@ -15,6 +15,11 @@ class EncType(Enum):
     CNNEncoder = 2
 
 
+class Encoding(Enum):
+    HydroMet = 0,
+    Full = 1
+
+
 class DatasetProperties:
     #years_per_sample = 1
     #length_days: int = 365 * years_per_sample
