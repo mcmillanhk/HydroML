@@ -16,6 +16,7 @@ import random
 import shapefile as shp
 import pickle
 from scipy import stats
+import matplotlib.ticker as mtick
 
 plotting_freq = 0
 batch_size = 128
@@ -483,7 +484,10 @@ def make_encoding_names(label, num_encodings):
 
 import matplotlib.cm as cm
 def colorplot_latlong(ax, encodingvec, title, lats, lons, add_legend, size=7):
-    encodingveccols = (encodingvec - encodingvec.min()) / max((encodingvec.max() - encodingvec.min()), 1e-8)
+    min_score = max(encodingvec.min(), -1.)
+    max_score = min(encodingvec.max(), 1.)
+    score_range = max((max_score - min_score), 1e-8)
+    encodingveccols = np.clip((encodingvec - min_score) / score_range, 0, 1)
     cmap = 'viridis'
     ax.scatter(lons, lats, c=encodingveccols, s=size, cmap=cmap)
     ax.set_title(title, fontsize=10)
@@ -491,7 +495,7 @@ def colorplot_latlong(ax, encodingvec, title, lats, lons, add_legend, size=7):
         # setup the colorbar
         #ax.tight_layout()
         scalarmap = cm.ScalarMappable(norm=mpl.colors.Normalize(), cmap=cmap)
-        scalarmap.set_array(encodingvec)
+        scalarmap.set_array([min_score, max_score])
         plt.colorbar(scalarmap)
         ax.set_xlabel("Long.", fontsize=8)
         ax.set_ylabel("Lat.", fontsize=8)
@@ -532,9 +536,6 @@ def cat_lat_lons(datapoints, lats, lons):
     lons = cat(lons, datapoints.latlong['gauge_lon'].to_numpy())
     return lats, lons
 
-class Object(object):
-    pass
-
 def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[Object], dataset_properties: DatasetProperties):
     for data_loader in data_loaders:
         for model in models:
@@ -549,14 +550,14 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                 outputs_ref, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
                                                  model.decoder_properties, dataset_properties, all_enc)
                 flow_ref = datapoints.flow_data
-                log_a_ref = model.decoder.log_a
-                log_b_ref = model.decoder.log_b
+                log_ab_ref = model.decoder.ablogs
                 for encoding_name, encoding_id in [('Full encoding', Encoding.Full), ('Hydro-met encoding', Encoding.HydroMet)]:
                     num_encodings = model.encoder_properties.encoding_dim()
                     cols, rows = encoding_fig_layout(num_encodings)
-                    num_stores = log_a_ref.shape[2]
+                    num_stores = log_ab_ref.log_a.shape[2]
                     log_a_perturbed = [None]*num_encodings
                     log_b_perturbed = [None]*num_encodings
+                    log_pet_perturbed = [None]*num_encodings
 
                     for encoding_idx in range(num_encodings):
                         model.decoder.log_ab = True
@@ -565,30 +566,60 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                                                                  res.enc_inputs)
                         outputs_perturbed, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
                                                                    model.decoder_properties, dataset_properties, all_enc_perturbed)
-                        log_a_perturbed[encoding_idx] = model.decoder.log_a
-                        log_b_perturbed[encoding_idx] = model.decoder.log_b
+                        log_a_perturbed[encoding_idx] = model.decoder.ablogs.log_a
+                        log_b_perturbed[encoding_idx] = model.decoder.ablogs.log_b
+                        log_pet_perturbed[encoding_idx] = model.decoder.ablogs.log_pet
 
                         model.encoder.perturbation = None
 
                     colors = plt.cm.jet(np.linspace(0, 1, num_stores))
                     for plot_bars in [True, False]:
-                        for plot_one in ([False] if plot_bars else [True, False]):
-                            for data_perturbed, data_ref, label in [(log_a_perturbed, log_a_ref, 'a'), (log_b_perturbed, log_b_ref, 'b')]:
-                                fig = plt.figure(figsize=(2 * rows, 2 * cols))
-                                title = encoding_name + ' ' + label + ' ' + ('0' if plot_one else '(average across catchments)')
+                        for plot_single_sample in ([False] if plot_bars else [False]):
+                            to_plot = [(log_a_perturbed, log_ab_ref.log_a, 'a'), (log_b_perturbed, log_ab_ref.log_b, 'b')]
+                            if plot_bars:
+                                to_plot += [(log_pet_perturbed, log_ab_ref.log_pet, 'PET')]
+                            for data_perturbed, data_ref, label in to_plot:
+                                fig = plt.figure(figsize=(2 * rows, 2 * (cols + 1)))
+                                title = encoding_name + ' ' + label + ' ' + ('0' if plot_single_sample else '(average across catchments)')
                                 fig.suptitle(title)
 
+                                important_stores = res.important_stores if data_ref.shape[2] == num_stores else [0]
+                                store_ids = [i + 1 for i in important_stores]
+
+                                max_range = 0
+                                ax = None
+                                figure_idx = 1
                                 for encoding_idx in range(num_encodings):
-                                    if plot_one:
+                                    if plot_single_sample:
                                         data_av = data_perturbed[encoding_idx][0, :, :] - data_ref[0, :, :]
                                     else:
-                                        data_av = np.mean(data_perturbed[encoding_idx] - data_ref, axis=0)
+                                        data_abschange = data_perturbed[encoding_idx] - data_ref  # b x t x s
+                                        data_normalized_abschange = data_abschange/np.expand_dims(
+                                            np.mean(data_ref, axis=1), 1)/0.1  # 0.1=perturbation
+                                        data_av = np.mean(data_normalized_abschange, axis=0)
 
-                                    ax = fig.add_subplot(rows, cols, encoding_idx+1)
-                                    for s in range(num_stores):
-                                        if plot_bars:
-                                            ax.bar(range(1, num_stores+1), np.mean(data_av, axis=0), color=colors)
+                                    ax = fig.add_subplot(rows, cols + 1, figure_idx, sharey=ax)
+                                    figure_idx += 2 if (figure_idx % (cols + 1) == cols) else 1
+
+                                    if plot_bars:
+                                        data_av_av = np.mean(data_av[:, important_stores], axis=0)
+                                        ax.bar(range(len(important_stores)), data_av_av,
+                                               color=colors[important_stores])
+                                        this_range = np.max(data_av_av) - np.min(data_av_av)
+                                        max_range = max(max_range, this_range if len(important_stores) > 1
+                                                        else np.fabs(data_av_av))
+                                        if encoding_idx % cols == 0:
+                                            ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1))
                                         else:
+                                            plt.setp(ax.get_yticklabels(), visible=False)
+                                        if encoding_idx >= (rows - 1) * cols:
+                                            ax.set_xticks(range(len(store_ids)))
+                                            ax.axes.xaxis.set_ticklabels([str(s) for s in store_ids])
+                                            ax.set_xlabel('Store')
+                                        else:
+                                            ax.set_xticks([])
+                                    else:
+                                        for s in range(num_stores):
                                             ax.plot(data_av[:, s], color=colors[s], linewidth=0.75)
                                             if encoding_idx < (rows-1)*cols:
                                                 ax.axes.xaxis.set_ticklabels([])
@@ -598,12 +629,24 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
 
                                         #ax.axes.yaxis.set_ticklabels([])
 
+                                if plot_bars:
+                                    tick_spacing = 1
+                                    while tick_spacing > max_range / 2:
+                                        tick_spacing /= 2
+                                    ax.yaxis.set_major_locator(mtick.MultipleLocator(base=tick_spacing))
+
                                 fig.tight_layout()
-                                plt.legend(range(1, num_stores + 1), bbox_to_anchor=(1.04, 1), loc="upper left")
+                                if len(store_ids) > 1:
+                                    if plot_bars:
+                                        labels = important_stores
+                                        handles = [plt.Rectangle((0, 0), 1, 1, color=colors[label]) for label in important_stores]
+                                        plt.legend(handles, labels, bbox_to_anchor=(1.04, 1), loc="upper left")
+                                    else:
+                                        plt.legend(store_ids, bbox_to_anchor=(1.04, 1), loc="upper left")
                                 savefig(title + ('-Bars' if plot_bars else '-overTime'), plt)
                                 plt.show()
 
-        return  # One batch of datapoints is enough
+            return  # One batch of datapoints is enough
 
 
 def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object], dataset_properties: DatasetProperties):
@@ -643,15 +686,16 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 res.nse_err = cat(res.nse_err, loss)
                 res.lats, res.lons = cat_lat_lons(datapoints, res.lats, res.lons)
 
-                res.log_a += [model.decoder.log_a]
-                res.log_b += [model.decoder.log_b]
-                res.log_temp += [model.decoder.log_temp]
+                res.log_a += [model.decoder.ablogs.log_a]
+                res.log_b += [model.decoder.ablogs.log_b]
+                #res.log_pet += [model.decoder.ablogs.log_pet]
+                res.log_temp += [model.decoder.ablogs.log_temp]
 
 
     for model in models:
         res = results[model.name]
         plot_nse_map(f"{model.name} NSE", res.lats, res.lons, res.nse_err)
-        classify_stores(model.name, res.log_a, res.log_b, res.log_temp)
+        res.important_stores = classify_stores(model.name, res.log_a, res.log_b, res.log_temp)
 
     for model1 in models:
         for model2 in models:
@@ -737,6 +781,13 @@ def classify_stores(name, log_a, log_b, log_temp):
     savefig(name + '-annualTrend', plt)
     plt.show()
 
+    # a is b x t x s. What's the maximum importance for each store anywhere?
+    max_importance = np.max(a, axis=(0,1))
+    print(f"{max_importance=}")
+
+    store_importance = np.max(a_average, axis=0)
+    important_stores = [i for i, importance in enumerate(store_importance) if importance > 0.1]
+    return important_stores
 
 
 def scatter_ab(fig, idx, a, aname, b, bname, logy=False):
@@ -1916,7 +1967,8 @@ torch.manual_seed(1)
 
 #can_encoder_learn_sigs(1)
 
-compare_models(40, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
+compare_models(50, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures"),
+                    (r"c:\\hydro\\pytorch_models\\116\\", "Learn Signatures2")])
 
 #compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
 #                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),

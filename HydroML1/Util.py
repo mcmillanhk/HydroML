@@ -20,6 +20,10 @@ class Encoding(Enum):
     Full = 1
 
 
+class Object(object):
+    pass
+
+
 class DatasetProperties:
     #years_per_sample = 1
     #length_days: int = 365 * years_per_sample
