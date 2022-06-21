@@ -22,7 +22,7 @@ plotting_freq = 0
 batch_size = 128
 
 def savefig(name, plt):
-    fig_output = r"c:\\hydro\\vector\\"
+    fig_output = r"c:\\hydro\\vector-6.20\\"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
     #Probably raster: plt.savefig(fig_output + name + '.eps')
@@ -527,7 +527,7 @@ def plot_states(ax, sf):
 
             x = [a[0] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
             y = [a[1] for a in stateshape.shape.points[longest_part_start:longest_part_end]]
-            ax.plot(x, y, 'k')
+            ax.plot(x, y, 'k', linewidth=1)
             last_long_part = long_part
 
 
@@ -624,8 +624,8 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                                             if encoding_idx < (rows-1)*cols:
                                                 ax.axes.xaxis.set_ticklabels([])
                                             else:
-                                                ax.set_xlabel('Day of hydro. year')
-                                        ax.set_title(f'Encoding {encoding_idx+1}')
+                                                label_axis_dates(ax)
+                                    ax.set_title(f'Encoding {encoding_idx+1}')
 
                                         #ax.axes.yaxis.set_ticklabels([])
 
@@ -649,6 +649,12 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
             return  # One batch of datapoints is enough
 
 
+def label_axis_dates(ax):
+    # ax.set_xlabel('Day of hydro. year')
+    ax.axes.xaxis.set_ticks([0, 92, 182, 273, 365])
+    ax.axes.xaxis.set_ticklabels(['Oct', 'Jan', 'Apr', 'Jul', 'Oct'])
+
+
 def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object], dataset_properties: DatasetProperties):
     for model in models:
         model.encoder.eval()
@@ -666,6 +672,10 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
         res.log_a = []
         res.log_b = []
         res.log_temp = []
+
+        res.max_a = {}
+        res.gauge_lat = {}
+        res.gauge_lon = {}
 
     for data_loader in data_loaders:
         for model in models:
@@ -686,16 +696,32 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 res.nse_err = cat(res.nse_err, loss)
                 res.lats, res.lons = cat_lat_lons(datapoints, res.lats, res.lons)
 
-                res.log_a += [model.decoder.ablogs.log_a]
+                res.log_a += [model.decoder.ablogs.log_a]  # b x t x s
                 res.log_b += [model.decoder.ablogs.log_b]
                 #res.log_pet += [model.decoder.ablogs.log_pet]
                 res.log_temp += [model.decoder.ablogs.log_temp]
+
+                num_stores = model.decoder.ablogs.log_a.shape[2]
+                for idx, gauge_id in enumerate(datapoints.gauge_id_int):
+                    if gauge_id not in res.max_a:
+                        res.max_a[gauge_id] = np.zeros((num_stores))
+                        res.gauge_lat[gauge_id] = datapoints.latlong['gauge_lat'][idx]
+                        res.gauge_lon[gauge_id] = datapoints.latlong['gauge_lon'][idx]
+                    res.max_a[gauge_id] = np.maximum(res.max_a[gauge_id], np.max(model.decoder.ablogs.log_a[idx, :, :],
+                                                                                axis=0))
 
 
     for model in models:
         res = results[model.name]
         plot_nse_map(f"{model.name} NSE", res.lats, res.lons, res.nse_err)
         res.important_stores = classify_stores(model.name, res.log_a, res.log_b, res.log_temp)
+
+        for store_id in range(num_stores):
+            plot_nse_map(f"{model.name}: max a[{store_id+1}]",
+                         np.array([lat for lat in res.gauge_lat.values()]),
+                         np.array([lon for lon in res.gauge_lon.values()]),
+                         np.array([a[store_id] for a in res.max_a.values()]))
+
 
     for model1 in models:
         for model2 in models:
@@ -774,7 +800,8 @@ def classify_stores(name, log_a, log_b, log_temp):
         ax = fig_av.add_subplot(2, 2, idx)
         for s in range(num_stores):
             ax.plot(series[:,s], color=colors[s])
-            ax.set_xlabel('Day of hydro. year')
+            label_axis_dates(ax)
+            #ax.set_xlabel('Day of hydro. year')
             ax.set_ylabel(label)
 
     plt.legend(range(1,num_stores+1), bbox_to_anchor=(1.04,1), loc="upper left")
@@ -1966,9 +1993,10 @@ torch.manual_seed(1)
 #reduce_encoding(1)
 
 #can_encoder_learn_sigs(1)
+compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
 
-compare_models(50, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures"),
-                    (r"c:\\hydro\\pytorch_models\\116\\", "Learn Signatures2")])
+#compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures"),
+#                    (r"c:\\hydro\\pytorch_models\\116\\", "Learn Signatures2")])
 
 #compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
 #                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
