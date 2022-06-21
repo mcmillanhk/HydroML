@@ -29,7 +29,7 @@ class HydModelNet(nn.Module):
         self.inflowlog = None
         self.outflowlog = None
         self.storelog = None
-        self.petlog = None
+        self.aetlog = None
 
         self.log_ab = False
         self.ablogs = None
@@ -88,13 +88,13 @@ class HydModelNet(nn.Module):
         self.inflowlog = np.zeros((timesteps, num_stores))
         self.outflowlog = np.zeros((timesteps, self.store_outflow_dim))
         self.storelog = np.zeros((timesteps, num_stores))
-        self.petlog = np.zeros((timesteps, 1))
+        self.aetlog = np.zeros((timesteps, 1))
         if self.log_ab:
             self.ablogs = Object()
             self.ablogs.log_a = np.zeros((batch_size, timesteps, num_stores))
             self.ablogs.log_b = np.zeros((batch_size, timesteps, num_stores))
             self.ablogs.log_temp = self.dataset_properties.temperatures(datapoints).transpose((0, 2, 1))
-            self.ablogs.log_pet = np.zeros((batch_size, timesteps, 1))
+            self.ablogs.log_aet = np.zeros((batch_size, timesteps, 1))
 
         fixed_data = None
         init_stores = None
@@ -181,12 +181,12 @@ class HydModelNet(nn.Module):
             flows[t, :] = flow_distn.sum(1)
 
             self.storelog[t, :] = stores[0, :].detach()
-            self.petlog[t, :] = et[0].detach()
+            self.aetlog[t, :] = et[0].detach()
 
             if self.log_ab:
                 self.ablogs.log_a[:, t, :] = a.detach()
                 self.ablogs.log_b[:, t, :] = b.detach()
-                self.ablogs.log_pet[:, t, :] = et.detach()
+                self.ablogs.log_aet[:, t, :] = et.detach()
 
         if error_check:
             if flows.min() < 0:

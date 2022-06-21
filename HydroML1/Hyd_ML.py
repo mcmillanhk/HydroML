@@ -22,7 +22,7 @@ plotting_freq = 0
 batch_size = 128
 
 def savefig(name, plt):
-    fig_output = r"c:\\hydro\\vector-6.20\\"
+    fig_output = r"c:\\hydro\\vector-6.20-AET\\"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
     #Probably raster: plt.savefig(fig_output + name + '.eps')
@@ -557,7 +557,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                     num_stores = log_ab_ref.log_a.shape[2]
                     log_a_perturbed = [None]*num_encodings
                     log_b_perturbed = [None]*num_encodings
-                    log_pet_perturbed = [None]*num_encodings
+                    log_aet_perturbed = [None]*num_encodings
 
                     for encoding_idx in range(num_encodings):
                         model.decoder.log_ab = True
@@ -568,7 +568,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                                                                    model.decoder_properties, dataset_properties, all_enc_perturbed)
                         log_a_perturbed[encoding_idx] = model.decoder.ablogs.log_a
                         log_b_perturbed[encoding_idx] = model.decoder.ablogs.log_b
-                        log_pet_perturbed[encoding_idx] = model.decoder.ablogs.log_pet
+                        log_aet_perturbed[encoding_idx] = model.decoder.ablogs.log_aet
 
                         model.encoder.perturbation = None
 
@@ -577,7 +577,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                         for plot_single_sample in ([False] if plot_bars else [False]):
                             to_plot = [(log_a_perturbed, log_ab_ref.log_a, 'a'), (log_b_perturbed, log_ab_ref.log_b, 'b')]
                             if plot_bars:
-                                to_plot += [(log_pet_perturbed, log_ab_ref.log_pet, 'PET')]
+                                to_plot += [(log_aet_perturbed, log_ab_ref.log_aet, 'AET')]
                             for data_perturbed, data_ref, label in to_plot:
                                 fig = plt.figure(figsize=(2 * rows, 2 * (cols + 1)))
                                 title = encoding_name + ' ' + label + ' ' + ('0' if plot_single_sample else '(average across catchments)')
@@ -698,7 +698,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
 
                 res.log_a += [model.decoder.ablogs.log_a]  # b x t x s
                 res.log_b += [model.decoder.ablogs.log_b]
-                #res.log_pet += [model.decoder.ablogs.log_pet]
+                #res.log_aet += [model.decoder.ablogs.log_aet]
                 res.log_temp += [model.decoder.ablogs.log_temp]
 
                 num_stores = model.decoder.ablogs.log_a.shape[2]
@@ -1212,7 +1212,7 @@ def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNe
         expected_et = q_mean * (1-rr) / prob_rain  # t x b?
 
         av_temp = np.mean(np.mean(temperatures, axis=1), axis=0)  # b
-        #expected_et should be somewhat dependent on temperature (TODO is PET available?)
+        #expected_et should be somewhat dependent on temperature (TODO is AET available?)
         temp_centered = (np.mean(temperatures, axis=1) - np.expand_dims(av_temp, 0))/5
         temp_centered_02 = np.tanh(temp_centered)+1
 
@@ -1662,14 +1662,14 @@ def plot_training(train, datapoints, dataset_properties, decoder, flow, idx, los
     ax_stores.set_title("Stores")
     if np.max(np.max(decoder.storelog)) > 100:  # np.min(np.min(decoder.storelog)) > 0:
         ax_stores.set_yscale('log')
-    ax_pet = fig.add_subplot(rows, cols, 6)
-    ax_pet.plot(decoder.petlog, color='r', label="PET (mm)")
+    ax_aet = fig.add_subplot(rows, cols, 6)
+    ax_aet.plot(decoder.aetlog, color='r', label="AET (mm)")
     temp = dataset_properties.temperatures(datapoints)[0, :, :]  # t x 2 [x b=0]
-    ax_temp = ax_pet.twinx()
+    ax_temp = ax_aet.twinx()
     cols = ['b', 'g']
     for tidx in [0, 1]:
         ax_temp.plot(temp[tidx, :], color=cols[tidx], label="Temperature (C)")  # Batch 0
-    ax_pet.set_title("PET and temperature")
+    ax_aet.set_title("AET and temperature")
     fig.show()
 
 
