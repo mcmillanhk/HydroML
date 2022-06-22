@@ -20,21 +20,21 @@ warnings.filterwarnings("ignore")
 class CamelsDataset(Dataset):
     """CAMELS dataset."""
 
-    def __init__(self, csv_file, root_dir_climate, root_dir_signatures, root_dir_flow,
+    def __init__(self, gauge_id_file, root_dir_climate, root_dir_camels_attributes, root_dir_flow,
                  dataset_properties: DatasetProperties, subsample_data, ablation_train=False, ablation_validate=False,
                  gauge_id=None, num_years=-1):
-        """
-        Args:
-            csv_file (string): Path to the csv file with signatures.
-               needs to be a csv file with catchment name followed by the (numeric?) signatures
-               data files should then be named as the catchment name (includes extension)
-            root_dir (string): Directory with all the rain, ET, flow data.
-        """
+
+        self.gauge_id_file = pd.read_csv(gauge_id_file, dtype=str, sep='\t')
+        self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].apply(lambda gauge_id: gauge_id if len(gauge_id) == 8 else ('0'+str(gauge_id)))
+        #self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].strip()
+
         self.normalize_inputs = False
         self.normalize_outputs = False
 
-        csv_file_attrib = [os.path.join(root_dir_signatures, 'camels_' + s + '.txt') for s in
+        csv_file_attrib = [os.path.join(root_dir_camels_attributes, 'camels_' + s + '.txt') for s in
                            ['soil', 'topo', 'vege', 'geol']]
+
+        csv_file = os.path.join(root_dir_camels_attributes, 'camels_hydro.txt')
 
         self.attrib_files = CamelsDataset.read_attributes(csv_file_attrib, ';')
         self.latlong = self.attrib_files[['gauge_id', 'gauge_lat', 'gauge_lon']]
@@ -44,12 +44,8 @@ class CamelsDataset(Dataset):
 
         for name, normalizer in dataset_properties.attrib_normalizers.items():
             self.attrib_files[name] = self.attrib_files[name].transform(lambda x: x*normalizer)
-            #if np.isnan(self.attrib_files[name]).any():
-            #    median = np.nanmedian(self.attrib_files[name])
-            #    self.attrib_files[name][np.isnan(self.attrib_files[name])] = median
-            #    print("Replacing nan with median=" + str(median) + " in " + name)
 
-        col_names = pd.read_csv(csv_file, nrows=0).columns
+        col_names = pd.read_csv(csv_file, nrows=0, sep=';').columns
         types_dict = {'gauge_id': str}
         types_dict.update({col: np.float64 for col in col_names if col not in types_dict})
 
@@ -64,29 +60,14 @@ class CamelsDataset(Dataset):
 
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
-        #self.hyd_data_labels = None
-        #self.sig_labels = None
         self.years_per_sample = num_years
 
         """number of samples depends on years/sample. """
-        num_sites = len(self.signatures_frame)
+        num_sites = len(self.gauge_id_file)
         print(f"Dropped {num_sites_init-num_sites} of {num_sites_init} sites because of nan")
-
-        """Save areas in order to later convert flow data to mm"""
-        #  root_dir_signatures = os.path.join('D:', 'Hil_ML', 'Input', 'CAMELS', 'camels_attributes_v2.0')
-        area_file = os.path.join(root_dir_signatures, 'camels_topo.txt')
-        col_names = pd.read_csv(area_file, nrows=0).columns
-        types_dict = {'gauge_id': str}
-        types_dict.update({col: np.float64 for col in col_names if col not in types_dict})
-        area_data = pd.read_csv(area_file, sep=';', dtype=types_dict)
-        area_data = pd.DataFrame(area_data[['gauge_id', 'area_gages2']])
-        area_data.set_index('gauge_id', inplace=True)
-        self.area_data = area_data
 
         for name, normalizer in dataset_properties.sig_normalizers.items():
             self.signatures_frame[name] = self.signatures_frame[name].transform(lambda x: x * normalizer)
-
-        #self.dataset_properties = dataset_properties??
 
         """Check amount of flow data for each site and build a table of this"""
         self.siteyears = pd.DataFrame(index=self.signatures_frame.iloc[:, 0],
@@ -108,7 +89,7 @@ class CamelsDataset(Dataset):
                 self.load_one_site(dataset_properties, idx_site)
         else:
             while len(self.all_items) == 0:
-                idx_site = np.random.randint(0, num_sites) if gauge_id is None else (self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].index[0])
+                idx_site = np.random.randint(0, num_sites) if gauge_id is None else (self.gauge_id_file.loc[self.gauge_id_file['gauge_id'] == gauge_id].index[0])
                 self.load_one_site(dataset_properties, idx_site, ablation_train, ablation_validate)
 
     @staticmethod
@@ -139,11 +120,12 @@ class CamelsDataset(Dataset):
 
     def load_one_site(self, dataset_properties, idx_site, ablation_train=False, ablation_validate=False):
         """Read in climate and flow data for this site"""
-        gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
+        gauge_id = str(self.gauge_id_file.iloc[idx_site, 0])
         flow_data_name = self.get_streamflow_filename(gauge_id)
         flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
                                 names=["year", "month", "day", "flow(cfs)", "qc"])
-        climate_data_name = self.get_met_filename(str(self.signatures_frame.iloc[idx_site, 0]))
+        sigs = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id]
+        climate_data_name = self.get_met_filename(gauge_id)
         climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
                                    usecols=[0, 1, 2, 3, 4, 5, 6, 7],
                                    parse_dates=True,
@@ -214,8 +196,9 @@ class CamelsDataset(Dataset):
                 flow_data_subset.tail(flow_data_subset.shape[0] - length_days).index, inplace=True)
 
     def get_subdir_filename(self, root_dir, gauge_id, file_suffix):
+        #gauge_id = gauge_id_nozero if len(gauge_id_nozero) == 8 else ('0'+str(gauge_id_nozero))
         flow_file = gauge_id + file_suffix
-        subdirs = ['.', gauge_id[0:2]] + os.listdir(root_dir)
+        subdirs = os.listdir(root_dir)
         for dirname in subdirs:
             flow_data_name = os.path.join(root_dir, dirname, flow_file)
             if os.path.exists(flow_data_name):
@@ -296,18 +279,12 @@ class CamelsDataset(Dataset):
         return self.load_hyddata(gauge_id, flow_date_start, flow_data, climate_data)"""
 
     def load_hyddata(self, gauge_id, flow_date_start, flow_data, climate_data):
-        flow_area = self.area_data.loc[gauge_id, 'area_gages2']
+        flow_area = self.attrib_files.loc[self.attrib_files['gauge_id'] == gauge_id, 'area_gages2']
         flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * cfs2mm / flow_area
 
         flow_data = flow_data.drop('qc', axis=1)
-        #self.check_dataframe(hyd_data)
 
-        #print('Load ' + gauge_id)
         attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == int(gauge_id)].drop('gauge_id', axis=1)
-        """for key in attribs.columns:
-            if key != 'gauge_id':
-                hyd_data[key] = attribs[key].iloc[0]"""
-        #self.check_dataframe(hyd_data)
 
         signatures = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].drop('gauge_id', axis=1)
         self.check_dataframe(signatures)
@@ -332,7 +309,7 @@ class CamelsDataset(Dataset):
             return self.all_csv_files[gauge_id]
 
         climate_file = self.get_met_filename(gauge_id)
-        flow_data_name = self.get_streamflow_filename(gauge_id)
+        flow_data_name = self.get_streamflow_filename(self.signatures_frame.loc[gauge_id])
         climate_data_name = os.path.join(self.root_dir_climate, climate_file)
         #  print("Got file names")
         """Extract correct years out of each file"""

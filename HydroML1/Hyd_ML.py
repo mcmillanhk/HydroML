@@ -43,24 +43,25 @@ def states():
     return shp.Reader("states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
 
 
-def load_inputs_years(subsample_data, batch_size, load_train, load_validate, load_test, num_years):
-    data_root = os.path.join('C:\\', 'hydro', 'basin_dataset_public_v1p2')
-    root_dir_flow = os.path.join(data_root, 'usgs_streamflow')
-    root_dir_climate = os.path.join(data_root, 'basin_mean_forcing', 'daymet')
-    root_dir_signatures = os.path.join(data_root, 'camels_attributes_v2.0')
-    csv_file_train = os.path.join(root_dir_signatures, 'camels_hydro_train.txt')
-    csv_file_validate = os.path.join(root_dir_signatures, 'camels_hydro_validate.txt')
-    csv_file_test = os.path.join(root_dir_signatures, 'camels_hydro_test.txt')
+def load_inputs_years(subsample_data, batch_size, load_train, load_validate, load_test, num_years,
+                      camels_root=r'C:\\hydro\\basin_dataset_public_v1p2',
+                      data_root=r'C:\\hydro\\HydroML\\data'):
+    root_dir_flow = os.path.join(camels_root, 'usgs_streamflow')
+    root_dir_climate = os.path.join(camels_root, 'basin_mean_forcing', 'daymet')
+    metadata_path = os.path.join(camels_root, r'camels_attributes_v2.0')
+    csv_file_train = os.path.join(data_root, 'train.txt')
+    csv_file_validate = os.path.join(data_root, 'validate.txt')
+    csv_file_test = os.path.join(data_root, 'test.txt')
 
     # Camels Dataset
     dataset_properties = DatasetProperties()
 
-    train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, root_dir_signatures, root_dir_flow, dataset_properties,
+    train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, metadata_path, root_dir_flow, dataset_properties,
                                      subsample_data=subsample_data, ablation_train=True, num_years=num_years) if load_train else None
 
     train_loader = None if train_dataset is None else DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-    test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, root_dir_signatures, root_dir_flow,
+    test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, metadata_path, root_dir_flow,
                                     dataset_properties, subsample_data=subsample_data, num_years=num_years) if load_test else None
 
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False,
@@ -68,7 +69,7 @@ def load_inputs_years(subsample_data, batch_size, load_train, load_validate, loa
 
     gauge_id = train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data <= 0 else None
     validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, root_dir_climate,
-                                        root_dir_signatures, root_dir_flow,
+                                        metadata_path, root_dir_flow,
                                         dataset_properties, subsample_data=subsample_data, ablation_validate=True,
                                         gauge_id=gauge_id, num_years=num_years) if load_validate else None
 
@@ -1974,11 +1975,11 @@ def can_encoder_learn_sigs(subsample_data):
 
 torch.manual_seed(1)
 #do_ablation_test()
-#train_test_everything(1)
+train_test_everything(40)
 #reduce_encoding(1)
 
 #can_encoder_learn_sigs(1)
-compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
+#compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
 
 #compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures"),
 #                    (r"c:\\hydro\\pytorch_models\\116\\", "Learn Signatures2")])
