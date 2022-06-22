@@ -1,12 +1,7 @@
 import shutil
-
-import numpy as np
 import scipy as sp
-import torch
-from torch.utils.data import DataLoader
 import CAMELS_data as Cd
 import os
-import math
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import time
@@ -18,49 +13,34 @@ import pickle
 from scipy import stats
 import matplotlib.ticker as mtick
 
-plotting_freq = 0
+plotting_freq = 1
 batch_size = 128
-perturbation = 0.1
+perturbation = 0.1  # For method of Morris
+weight_decay = 0*0.0001
+
 
 def savefig(name, plt):
-    fig_output = r"c:\\hydro\\vector-6.20-mmdir\\"
+    fig_output = r"figures"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
-    #Probably raster: plt.savefig(fig_output + name + '.eps')
-    plt.savefig(fig_output + name + '.svg')
+    plt.savefig(fig_output + r'\\' + name + '.svg')
 
-# Return 1-nse as we will minimize this
+
+# Return NSE and huber(1-NSE), which is what we minimize
 def nse_loss(output, target):  # both inputs t x b
     num = torch.sum((output - target)**2, dim=[0])
     denom = torch.sum((target - torch.mean(target, dim=[0]).unsqueeze(0))**2, dim=[0])
     loss = num/denom.clamp(min=1)
-    if loss.shape[0] > 300:
-        print("ERROR loss.shape={loss.shape}, should be batch size, likely mismatch with timesteps.")
 
-    if True:
-        # Huber-damped loss
-        hl = torch.nn.HuberLoss(delta=0.25)
-        huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
-    elif True:
-        # Plain NSE loss
-        return numpy_nse(loss.detach().numpy()), loss.mean()
-    else:
-        # Basically least-squares
-        huber_loss = old_nse_loss(output, target)
+    # Huber-damped loss
+    hl = torch.nn.HuberLoss(delta=0.25)
+    huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
 
     return numpy_nse(loss.detach().numpy()), huber_loss
 
 
-def old_nse_loss(output, target):  # both inputs t x b
-    loss = torch.sum((output - target)**2)/torch.sum(target**2)
-    return loss
-
-
 def states():
-    return shp.Reader("states_shapefile/cb_2017_us_state_5m.shp")
-
-
-weight_decay = 0*0.0001
+    return shp.Reader("states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
 
 
 def load_inputs_years(subsample_data, batch_size, load_train, load_validate, load_test, num_years):
