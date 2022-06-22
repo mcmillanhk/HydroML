@@ -593,27 +593,6 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                                 for encoding_idx in range(num_encodings):
                                     if plot_single_sample:
                                         data_av = data_perturbed[encoding_idx][0, :, :] - data_ref[0, :, :]
-                                        """
-                                    elif plot_trend and len(store_ids) > 1:
-                                        data_av = np.zeros_like(data_ref[:, 0, :])
-                                        for b in range(data_ref.shape[0]):
-                                            max_precip = np.argmax(log_ab_ref.log_precip[b, :])
-                                            for s in range(num_stores):
-                                                p = data_perturbed[encoding_idx][b, max_precip, s]
-                                                r = data_ref[b, max_precip, s]
-                                                data_av[b, s] = p - r
-
-                                        pert_centered = center(data_perturbed[encoding_idx])
-                                        ref_centered = center(data_ref)
-
-                                        data_av = np.zeros_like(ref_centered[:, 0, :])
-                                        for b in range(data_ref.shape[0]):
-                                            for s in range(num_stores):
-                                                p, _ = np.polyfit(pert_centered[b, :, s], log_ab_ref.log_precip[b, :], 1)
-                                                r, _ = np.polyfit(ref_centered[b, :, s], log_ab_ref.log_precip[b, :], 1)
-                                                data_av[b, s] = p - r
-                                        """
-
                                     else:
                                         data_abschange = data_perturbed[encoding_idx] - data_ref  # b x t x s
                                         data_normalized_abschange = data_abschange/np.expand_dims(
