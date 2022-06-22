@@ -95,6 +95,7 @@ class HydModelNet(nn.Module):
             self.ablogs.log_b = np.zeros((batch_size, timesteps, num_stores))
             self.ablogs.log_temp = self.dataset_properties.temperatures(datapoints).transpose((0, 2, 1))
             self.ablogs.log_aet = np.zeros((batch_size, timesteps, 1))
+            self.ablogs.log_precip = rain
 
         fixed_data = None
         init_stores = None

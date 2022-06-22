@@ -20,9 +20,10 @@ import matplotlib.ticker as mtick
 
 plotting_freq = 0
 batch_size = 128
+perturbation = 0.1
 
 def savefig(name, plt):
-    fig_output = r"c:\\hydro\\vector-6.20-AET\\"
+    fig_output = r"c:\\hydro\\vector-6.20-mmdir\\"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
     #Probably raster: plt.savefig(fig_output + name + '.eps')
@@ -222,7 +223,7 @@ class Encoder(nn.Module):
         return out, hydro_met_encoding  # both b x e
 
     def perturb(self, out):
-        out[:, self.perturbation[1]] += 0.1
+        out[:, self.perturbation[1]] += perturbation
 
 
 class SimpleLSTM(nn.Module):
@@ -592,10 +593,31 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                                 for encoding_idx in range(num_encodings):
                                     if plot_single_sample:
                                         data_av = data_perturbed[encoding_idx][0, :, :] - data_ref[0, :, :]
+                                        """
+                                    elif plot_trend and len(store_ids) > 1:
+                                        data_av = np.zeros_like(data_ref[:, 0, :])
+                                        for b in range(data_ref.shape[0]):
+                                            max_precip = np.argmax(log_ab_ref.log_precip[b, :])
+                                            for s in range(num_stores):
+                                                p = data_perturbed[encoding_idx][b, max_precip, s]
+                                                r = data_ref[b, max_precip, s]
+                                                data_av[b, s] = p - r
+
+                                        pert_centered = center(data_perturbed[encoding_idx])
+                                        ref_centered = center(data_ref)
+
+                                        data_av = np.zeros_like(ref_centered[:, 0, :])
+                                        for b in range(data_ref.shape[0]):
+                                            for s in range(num_stores):
+                                                p, _ = np.polyfit(pert_centered[b, :, s], log_ab_ref.log_precip[b, :], 1)
+                                                r, _ = np.polyfit(ref_centered[b, :, s], log_ab_ref.log_precip[b, :], 1)
+                                                data_av[b, s] = p - r
+                                        """
+
                                     else:
                                         data_abschange = data_perturbed[encoding_idx] - data_ref  # b x t x s
                                         data_normalized_abschange = data_abschange/np.expand_dims(
-                                            np.mean(data_ref, axis=1), 1)/0.1  # 0.1=perturbation
+                                            np.mean(data_ref, axis=1), 1)/perturbation
                                         data_av = np.mean(data_normalized_abschange, axis=0)
 
                                     ax = fig.add_subplot(rows, cols + 1, figure_idx, sharey=ax)
@@ -629,7 +651,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
 
                                         #ax.axes.yaxis.set_ticklabels([])
 
-                                if plot_bars:
+                                if plot_bars and not plot_trend:
                                     tick_spacing = 1
                                     while tick_spacing > max_range / 2:
                                         tick_spacing /= 2
@@ -647,6 +669,10 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                                 plt.show()
 
             return  # One batch of datapoints is enough
+
+
+def center(data_perturbed):
+    return data_perturbed - np.expand_dims(np.mean(data_perturbed, axis=1), 1)
 
 
 def label_axis_dates(ax):
@@ -813,7 +839,7 @@ def classify_stores(name, log_a, log_b, log_temp):
     print(f"{max_importance=}")
 
     store_importance = np.max(a_average, axis=0)
-    important_stores = [i for i, importance in enumerate(store_importance) if importance > 0.1]
+    important_stores = [i for i, importance in enumerate(store_importance) if importance > 0.]
     return important_stores
 
 
