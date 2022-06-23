@@ -611,7 +611,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
 
                                         #ax.axes.yaxis.set_ticklabels([])
 
-                                if plot_bars and not plot_trend:
+                                if plot_bars:
                                     tick_spacing = 1
                                     while tick_spacing > max_range / 2:
                                         tick_spacing /= 2
@@ -1975,11 +1975,11 @@ def can_encoder_learn_sigs(subsample_data):
 
 torch.manual_seed(1)
 #do_ablation_test()
-train_test_everything(40)
+train_test_everything(10)
 #reduce_encoding(1)
 
 #can_encoder_learn_sigs(1)
-#compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
+#compare_models(40, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
 
 #compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures"),
 #                    (r"c:\\hydro\\pytorch_models\\116\\", "Learn Signatures2")])
