@@ -36,6 +36,7 @@ class CamelsDataset(Dataset):
 
         csv_file = os.path.join(root_dir_camels_attributes, 'camels_hydro.txt')
 
+        types_dict = {'gauge_id': str}
         self.attrib_files = CamelsDataset.read_attributes(csv_file_attrib, ';')
         self.latlong = self.attrib_files[['gauge_id', 'gauge_lat', 'gauge_lon']]
         self.attrib_files = self.attrib_files[['gauge_id'] + list(dataset_properties.attrib_normalizers.keys())]
@@ -46,7 +47,6 @@ class CamelsDataset(Dataset):
             self.attrib_files[name] = self.attrib_files[name].transform(lambda x: x*normalizer)
 
         col_names = pd.read_csv(csv_file, nrows=0, sep=';').columns
-        types_dict = {'gauge_id': str}
         types_dict.update({col: np.float64 for col in col_names if col not in types_dict})
 
         self.signatures_frame = pd.read_csv(csv_file, sep=';', dtype=types_dict)
@@ -95,20 +95,21 @@ class CamelsDataset(Dataset):
     @staticmethod
     def remove_nan(df):
         for name in df.columns:
-            if np.isnan(df[name]).any():
-                median = np.nanmedian(df[name])
-                df[name][np.isnan(df[name])] = median
-                print("Replacing nan with median=" + str(median) + " in " + name)
-            if np.isinf(df[name]).any():
-                max_finite = np.nanmax(df[name][np.isfinite(df[name])]) + 1
-                df[name][np.isinf(df[name])] = max_finite
-                print("Replacing inf with max + 1=" + str(max_finite) + " in " + name)
+            if name != 'gauge_id':
+                if np.isnan(df[name]).any():
+                    median = np.nanmedian(df[name])
+                    df[name][np.isnan(df[name])] = median
+                    print("Replacing nan with median=" + str(median) + " in " + name)
+                if np.isinf(df[name]).any():
+                    max_finite = np.nanmax(df[name][np.isfinite(df[name])]) + 1
+                    df[name][np.isinf(df[name])] = max_finite
+                    print("Replacing inf with max + 1=" + str(max_finite) + " in " + name)
 
     @staticmethod
     def read_attributes(csv_file_attrib, sep):
         combined_attrib_file=None
         for file in csv_file_attrib:
-            attrib_file = pd.read_csv(file, sep=sep)
+            attrib_file = pd.read_csv(file, sep=sep, dtype={'gauge_id': str})
             print('Loaded columns ' + str(attrib_file.columns) + ' from ' + file)
             # Could do some labels-to-1-hot
             if combined_attrib_file is None:
@@ -124,7 +125,7 @@ class CamelsDataset(Dataset):
         flow_data_name = self.get_streamflow_filename(gauge_id)
         flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
                                 names=["year", "month", "day", "flow(cfs)", "qc"])
-        sigs = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id]
+        #sigs = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id]
         climate_data_name = self.get_met_filename(gauge_id)
         climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
                                    usecols=[0, 1, 2, 3, 4, 5, 6, 7],
@@ -137,7 +138,7 @@ class CamelsDataset(Dataset):
                             "excluding date (TODO add code to remove unwanted columns if needed)")
         for name, normalizer in dataset_properties.climate_norm.items():
             climate_data[name] = climate_data[name].transform(lambda x: x * normalizer)
-        """Missing data label converted to 0/1"""
+        """Missing data label converted to 0/1 TODO how often is this happening? """
         d = {'A': 0, 'A:e': 0, 'M': 1}
         flow_data["qc"] = flow_data["qc"].map(d)
         flow_data["qc"][np.isnan(flow_data["qc"])] = 1
@@ -185,7 +186,7 @@ class CamelsDataset(Dataset):
             self.clamp_length(dataset_properties, flow_data_subset)
             self.clamp_length(dataset_properties, climate_data_subset)
 
-            self.all_items.append(self.load_hyddata(gauge_id, flow_date_start,
+            self.all_items.append(self.load_hyddata(gauge_id, dataset_properties, flow_date_start,
                                                     flow_data_subset.drop(['year', 'month', 'day'], axis=1),
                                                     climate_data_subset.drop(['date'], axis=1)))
 
@@ -278,30 +279,35 @@ class CamelsDataset(Dataset):
 
         return self.load_hyddata(gauge_id, flow_date_start, flow_data, climate_data)"""
 
-    def load_hyddata(self, gauge_id, flow_date_start, flow_data, climate_data):
-        flow_area = self.attrib_files.loc[self.attrib_files['gauge_id'] == gauge_id, 'area_gages2']
-        flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * cfs2mm / flow_area
+    def load_hyddata(self, gauge_id, dataset_properties, flow_date_start, flow_data, climate_data):
+        attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == gauge_id].drop('gauge_id', axis=1)
+        flow_area = attribs['area_gages2']/dataset_properties.attrib_normalizers['area_gages2']
+        flow_data["flow(cfs)"] = flow_data["flow(cfs)"] * cfs2mm / float(flow_area)
 
         flow_data = flow_data.drop('qc', axis=1)
 
-        attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == int(gauge_id)].drop('gauge_id', axis=1)
+        CamelsDataset.check_unit_size(attribs)
 
         signatures = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id].drop('gauge_id', axis=1)
+        CamelsDataset.check_unit_size(signatures)
+
         self.check_dataframe(signatures)
 
-        extra_signatures = self.extra_sigs_files.loc[self.extra_sigs_files['gauge_id'] == int(gauge_id)].drop('gauge_id', axis=1)
-        #for name in extra_signatures.columns: #TODO apply earlier and to function
-        #    if np.isnan(extra_signatures[name]).any():
-        #        raise Exception('Failed to remove nan')
-
+        extra_signatures = self.extra_sigs_files.loc[self.extra_sigs_files['gauge_id'] == str(int(gauge_id))].drop('gauge_id', axis=1)
+        CamelsDataset.check_unit_size(extra_signatures)
         self.check_dataframe(extra_signatures)
 
-        latlong = self.latlong.loc[self.latlong['gauge_id'] == float(gauge_id)]
-
+        latlong = self.latlong.loc[self.latlong['gauge_id'] == gauge_id]
+        CamelsDataset.check_unit_size(latlong)
 
         return DataPoint(gauge_id+'-'+str(flow_date_start), torch.tensor(flow_data.values), flow_data.columns.tolist(),
                          torch.tensor(climate_data.values), climate_data.columns.tolist(), signatures, extra_signatures,
                          attribs, latlong)
+
+    @staticmethod
+    def check_unit_size(attribs):
+        if len(attribs) != 1:
+            raise Exception(f"Failed to load exactly one record. Got {len(attribs)}")
 
     def load_flow_climate_csv(self, gauge_id):
 

@@ -40,7 +40,7 @@ def nse_loss(output, target):  # both inputs t x b
 
 
 def states():
-    return shp.Reader("states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
+    return shp.Reader("data/states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
 
 
 def load_inputs_years(subsample_data, batch_size, load_train, load_validate, load_test, num_years,
