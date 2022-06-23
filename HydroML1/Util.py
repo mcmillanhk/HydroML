@@ -1,12 +1,12 @@
+# Defines model hyperparameters, plus some utility methods
+
 from enum import Enum
 
 from torch.utils.data import DataLoader
 
 from DataPoint import *
-import pandas as pd
 import numpy as np
 import torch
-from typing import List
 
 
 class EncType(Enum):

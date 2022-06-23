@@ -1,3 +1,6 @@
+# Implements one datapoint (N years of hydro + met data plus attributes etc.)
+# The encoder-decoder model consumes one datapoint for the encoding and a second for decoding. N can be different.
+
 import pandas as pd
 import numpy as np
 from typing import List

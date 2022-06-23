@@ -1,3 +1,5 @@
+# Implements the decoder
+
 import torch.nn as nn
 from Util import *
 import numpy as np

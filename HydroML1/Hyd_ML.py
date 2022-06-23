@@ -1,3 +1,6 @@
+# Implements all the main training and testing algorithms
+# Also implements the encoder (TODO move to own file)
+
 import shutil
 import scipy as sp
 import CAMELS_data as Cd
@@ -1901,6 +1904,9 @@ def load_network(load_decoder, load_encoder, dataset_properties, model_load_path
     return decoder, decoder_properties, encoder, encoder_properties
 
 
+# Load data from one catchment at a time and fit model (to test how good the model could perform, and whether the
+# decoder structure is suitable.
+# TODO make sure all paths are configurable here
 def do_ablation_test():
     init_validate_nse = []
     final_validate_nse = []
@@ -1987,6 +1993,7 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
     fig.show()
 
 
+#Test whether/how well this encoder structure can learn existing CAMELS signatures.
 def can_encoder_learn_sigs(subsample_data):
     dataset_train, dataset_validate, _, dataset_properties \
         = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,

@@ -1,3 +1,5 @@
+# Camels data -> DataPoint reader.
+
 from __future__ import print_function, division
 import os
 
@@ -9,17 +11,12 @@ from DataPoint import *
 
 cfs2mm = 2.446575546
 
-# Ignore warnings
+# Ignore warnings. TODO remove this.
 import warnings
 warnings.filterwarnings("ignore")
 
 
-"""Used https://pytorch.org/tutorials/beginner/data_loading_tutorial.html as example"""
-
-
 class CamelsDataset(Dataset):
-    """CAMELS dataset."""
-
     def __init__(self, gauge_id_file, root_dir_climate, root_dir_camels_attributes, root_dir_flow,
                  dataset_properties: DatasetProperties, subsample_data, ablation_train=False, ablation_validate=False,
                  gauge_id=None, num_years=-1):
