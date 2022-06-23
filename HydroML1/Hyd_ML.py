@@ -16,7 +16,9 @@ import matplotlib.ticker as mtick
 plotting_freq = 1
 batch_size = 128
 perturbation = 0.1  # For method of Morris
-weight_decay = 0*0.0001
+weight_decay = 0
+
+model_store_root = '.'  # For loading the states data and the train/test/validate data
 
 
 def savefig(name, plt):
@@ -34,18 +36,16 @@ def nse_loss(output, target):  # both inputs t x b
 
     # Huber-damped loss
     hl = torch.nn.HuberLoss(delta=0.25)
-    huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  #Probably simpler to just expand the Huber expression?
+    huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  # Probably simpler to just expand the Huber expression?
 
     return numpy_nse(loss.detach().numpy()), huber_loss
 
 
 def states():
-    return shp.Reader("data/states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
+    return shp.Reader(model_store_root + "/states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
 
 
-def load_inputs_years(subsample_data, batch_size, load_train, load_validate, load_test, num_years,
-                      camels_root=r'C:\\hydro\\basin_dataset_public_v1p2',
-                      data_root=r'C:\\hydro\\HydroML\\data'):
+def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_train, load_validate, load_test, num_years):
     root_dir_flow = os.path.join(camels_root, 'usgs_streamflow')
     root_dir_climate = os.path.join(camels_root, 'basin_mean_forcing', 'daymet')
     metadata_path = os.path.join(camels_root, r'camels_attributes_v2.0')
@@ -83,9 +83,9 @@ def load_inputs_years(subsample_data, batch_size, load_train, load_validate, loa
     return train_loader, validate_loader, test_loader, dataset_properties
 
 
-def load_inputs(subsample_data, batch_size, load_train, load_validate, load_test, encoder_years, decoder_years=None):
+def load_inputs(camels_path, data_root, subsample_data, batch_size, load_train, load_validate, load_test, encoder_years, decoder_years=None):
     train_loader_enc, validate_loader_enc, test_loader_enc, dataset_properties = load_inputs_years(subsample_data,
-                                                                                       batch_size,
+                                                                                       camels_path, data_root, batch_size,
                                                                                        load_train, load_validate,
                                                                                        load_test, encoder_years)
     if decoder_years is None or decoder_years == encoder_years:
@@ -93,7 +93,7 @@ def load_inputs(subsample_data, batch_size, load_train, load_validate, load_test
                                                                     test_loader_enc)
     else:
         train_loader_dec, validate_loader_dec, test_loader_dec, dataset_properties = load_inputs_years(subsample_data,
-                                                                                       batch_size,
+                                                                                       camels_path, data_root, batch_size,
                                                                                        load_train, load_validate,
                                                                                        load_test, decoder_years)
     return DataLoaders(train_loader_enc, train_loader_dec) if load_train else None,\
@@ -1778,23 +1778,31 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
         break
 
 
-def train_test_everything(subsample_data):
+# Jointly train encoder-decoder from either random initialization, or from a previously-saved model.
+# \subsample_data: reduce data by this amount (1=all, 2=half, etc.). Useful for quickly testing changes.
+# \model_load_path: get pretrained model from here (see models directory in git repo).
+# \camels_path: path to Camels-US dataset
+# Set encoder and decoder hyperparameters in Util.py
+# A few other parameters are hardcoded in this file: batch size at top, # years' data per datapoint below (separate for
+# encoder and decoder)
+def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:\\hydro\\basin_dataset_public_v1p2", model_load_path = 'c:\\hydro\\pytorch_models\\113-E1200\\', model_store_path = 'c:\\hydro\\pytorch_models\\out\\', data_root=r'C:\\hydro\\HydroML\\data'):
+    torch.manual_seed(seed)
+
+    global model_store_root # TODO pass through path somehow
+    model_store_root = data_root
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
+        = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
                       load_test=False, encoder_years=1, decoder_years=1)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
 
-    # model_store_path = 'D:\\Hil_ML\\pytorch_models\\15-hydyear-realfakedata\\'
-    model_load_path = 'c:\\hydro\\pytorch_models\\113-E1200\\'
-    model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
-    load_encoder = False
-    load_decoder = False
+    load_encoder = model_load_path is not None
+    load_decoder = model_load_path is not None
 
     decoder, decoder_properties, encoder, encoder_properties = load_network(load_decoder, load_encoder,
                                                                             dataset_properties,
@@ -1855,10 +1863,12 @@ def reduce_encoding(subsample_data):
 
 
 def load_network(load_decoder, load_encoder, dataset_properties, model_load_path, batch_size):
-    encoder_load_path = model_load_path + 'encoder.ckpt'
-    encoder_properties_load_path = model_load_path + 'encoder_properties.pkl'
-    decoder_load_path = model_load_path + 'decoder.ckpt'
-    decoder_properties_load_path = model_load_path + 'decoder_properties.pkl'
+    if load_encoder:
+        encoder_load_path = model_load_path + 'encoder.ckpt'
+        encoder_properties_load_path = model_load_path + 'encoder_properties.pkl'
+    if load_decoder:
+        decoder_load_path = model_load_path + 'decoder.ckpt'
+        decoder_properties_load_path = model_load_path + 'decoder_properties.pkl'
 
     encoder_properties = EncoderProperties()
     #with open(encoder_properties_load_path, 'wb') as outp:
@@ -1973,17 +1983,3 @@ def can_encoder_learn_sigs(subsample_data):
     train_encoder_only(encoder, dataset_train, dataset_validate, dataset_properties, encoder_properties, None)
 
 
-torch.manual_seed(1)
-#do_ablation_test()
-train_test_everything(10)
-#reduce_encoding(1)
-
-#can_encoder_learn_sigs(1)
-#compare_models(40, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures")])
-
-#compare_models(1, [(r"c:\\hydro\\pytorch_models\\115\\", "Learn Signatures"),
-#                    (r"c:\\hydro\\pytorch_models\\116\\", "Learn Signatures2")])
-
-#compare_models(1, [(r"c:\\hydro\\pytorch_models\\99-Encode-0.001\\", "Learn Signatures"),
-#                   (r"c:\\hydro\\pytorch_models\\96-SigsNoEncoding\\", "CAMELS Signatures"),
-#                   (r"c:\\hydro\\pytorch_models\\95-NoSigsNoEncoding\\", "No Signatures"), ])
