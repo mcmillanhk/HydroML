@@ -1470,11 +1470,11 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
         elif val_median < 0.9*max_val_median and epoch > 10:
             break
 
-        torch.save(encoder.state_dict(), model_store_path + 'encoder.ckpt')
-        torch.save(decoder.state_dict(), model_store_path + 'decoder.ckpt')
-        with open(model_store_path+'encoder_properties.pkl', 'wb') as outp:
+        torch.save(encoder.state_dict(), model_store_path + '/encoder.ckpt')
+        torch.save(decoder.state_dict(), model_store_path + '/decoder.ckpt')
+        with open(model_store_path+'/encoder_properties.pkl', 'wb') as outp:
             pickle.dump(encoder_properties, outp)
-        with open(model_store_path+'decoder_properties.pkl', 'wb') as outp:
+        with open(model_store_path+'/decoder_properties.pkl', 'wb') as outp:
             pickle.dump(decoder_properties, outp)
 
     return init_val_nse, max_val_nse
@@ -1782,10 +1782,14 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 # \subsample_data: reduce data by this amount (1=all, 2=half, etc.). Useful for quickly testing changes.
 # \model_load_path: get pretrained model from here (see models directory in git repo).
 # \camels_path: path to Camels-US dataset
+# \data_root: Path to directory from git containing train/test/validate split plus US states outline
 # Set encoder and decoder hyperparameters in Util.py
 # A few other parameters are hardcoded in this file: batch size at top, # years' data per datapoint below (separate for
 # encoder and decoder)
-def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:\\hydro\\basin_dataset_public_v1p2", model_load_path = 'c:\\hydro\\pytorch_models\\113-E1200\\', model_store_path = 'c:\\hydro\\pytorch_models\\out\\', data_root=r'C:\\hydro\\HydroML\\data'):
+def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:\\hydro\\basin_dataset_public_v1p2",
+                          model_load_path = 'c:\\hydro\\pytorch_models\\113-E1200\\',
+                          model_store_path = 'c:\\hydro\\pytorch_models\\out\\',
+                          data_root=r'C:\\hydro\\HydroML\\data'):
     torch.manual_seed(seed)
 
     global model_store_root # TODO pass through path somehow
@@ -1864,11 +1868,11 @@ def reduce_encoding(subsample_data):
 
 def load_network(load_decoder, load_encoder, dataset_properties, model_load_path, batch_size):
     if load_encoder:
-        encoder_load_path = model_load_path + 'encoder.ckpt'
-        encoder_properties_load_path = model_load_path + 'encoder_properties.pkl'
+        encoder_load_path = model_load_path + '/encoder.ckpt'
+        encoder_properties_load_path = model_load_path + '/encoder_properties.pkl'
     if load_decoder:
-        decoder_load_path = model_load_path + 'decoder.ckpt'
-        decoder_properties_load_path = model_load_path + 'decoder_properties.pkl'
+        decoder_load_path = model_load_path + '/decoder.ckpt'
+        decoder_properties_load_path = model_load_path + '/decoder_properties.pkl'
 
     encoder_properties = EncoderProperties()
     #with open(encoder_properties_load_path, 'wb') as outp:
@@ -1926,10 +1930,19 @@ def do_ablation_test():
         fig.show()
 
 
-def compare_models(subsample_data, model_load_paths):
+# Generate plots from each of a list of models, and compare models.
+# \camels_path: Path to CAMELS dataset
+# \data_root: Path to directory from git containing train/test/validate split plus US states outline
+# \subsample_data: 1 to load every datapoint; 2 to load every 2nd datapoint etc. For fast testing.
+# \model_load_paths: List of (model_load_path, "Model name") tuples.
+def compare_models(camels_path, data_root, subsample_data, model_load_paths):
     dataset_train, dataset_val, dataset_test, dataset_properties \
-        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
+        = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
                       encoder_years=1, decoder_years=1)
+
+    global model_store_root # TODO pass through path somehow
+    model_store_root = data_root
+
     all_datasets = [dataset_train, dataset_val, dataset_test]
     datasets = []
     for dataset in all_datasets:
