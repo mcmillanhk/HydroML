@@ -49,9 +49,6 @@ def states():
 
 
 def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_train, load_validate, load_test, num_years):
-    root_dir_flow = os.path.join(camels_root, 'usgs_streamflow')
-    root_dir_climate = os.path.join(camels_root, 'basin_mean_forcing', 'daymet')
-    metadata_path = os.path.join(camels_root, r'camels_attributes_v2.0')
     csv_file_train = os.path.join(data_root, 'train.txt')
     csv_file_validate = os.path.join(data_root, 'validate.txt')
     csv_file_test = os.path.join(data_root, 'test.txt')
@@ -59,20 +56,19 @@ def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_t
     # Camels Dataset
     dataset_properties = DatasetProperties()
 
-    train_dataset = Cd.CamelsDataset(csv_file_train, root_dir_climate, metadata_path, root_dir_flow, dataset_properties,
+    train_dataset = Cd.CamelsDataset(csv_file_train, camels_root, dataset_properties,
                                      subsample_data=subsample_data, ablation_train=True, num_years=num_years) if load_train else None
 
     train_loader = None if train_dataset is None else DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-    test_dataset = Cd.CamelsDataset(csv_file_test, root_dir_climate, metadata_path, root_dir_flow,
+    test_dataset = Cd.CamelsDataset(csv_file_test, camels_root,
                                     dataset_properties, subsample_data=subsample_data, num_years=num_years) if load_test else None
 
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False,
                                                                collate_fn=collate_fn)
 
     gauge_id = train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data <= 0 else None
-    validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, root_dir_climate,
-                                        metadata_path, root_dir_flow,
+    validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, camels_root,
                                         dataset_properties, subsample_data=subsample_data, ablation_validate=True,
                                         gauge_id=gauge_id, num_years=num_years) if load_validate else None
 
@@ -2002,4 +1998,40 @@ def can_encoder_learn_sigs(subsample_data):
     encoder = ConvEncoder(dataset_properties, encoder_properties).double()
     train_encoder_only(encoder, dataset_train, dataset_validate, dataset_properties, encoder_properties, None)
 
+
+def analyse_one_site(gauge_id, camels_path, data_root, model_load_path):
+    #dataset_train, dataset_val, dataset_test, dataset_properties \
+    #    = load_inputs(camels_path, data_root, subsample_data=1, batch_size=1, load_train=True, load_validate=True, load_test=False,
+    #                  encoder_years=1, decoder_years=1)
+
+    global model_store_root # TODO pass through path somehow
+    model_store_root = data_root
+
+    dataset_properties = DatasetProperties()
+    dataset = Cd.CamelsDataset(None, camels_path, dataset_properties, 1, False, False, gauge_id=gauge_id, num_years=1)
+    dataloader = Object()
+    dataloader.enc = DataLoader(dataset=dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
+    dataloader.dec = dataloader.enc
+
+    decoder, decoder_properties, encoder, encoder_properties =\
+            load_network(True, True, dataset_properties, model_load_path, 1)
+
+    er = EpochRunner()
+
+    enc_inputs = all_encoder_inputs(dataloader, encoder_properties, dataset_properties)
+
+    # Drop all but one so we get the same encoding every time
+    gauge_enc = enc_inputs[int(gauge_id)]
+    enc_idx = min(7, gauge_enc[0].shape[0]-1)
+    enc_inputs[int(gauge_id)] = (gauge_enc[0][enc_idx:enc_idx+1, :, :], gauge_enc[1][enc_idx:enc_idx+1, :])
+
+    er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, decoder,
+                                decoder_properties, encoder, encoder_properties, [], None,
+                                [0], False, dataloader, [])
+
+    for encoding_idx in [7, 15]:
+        encoder.perturbation = (Encoding.HydroMet, encoding_idx)
+        er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, decoder,
+                                    decoder_properties, encoder, encoder_properties, [], None,
+                                    [0], False, dataloader, [])
 

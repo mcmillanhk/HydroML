@@ -8,25 +8,29 @@ from torch.utils.data import Dataset, DataLoader
 
 from Util import *
 from DataPoint import *
+from datetime import datetime
 
 cfs2mm = 2.446575546
 
 # Ignore warnings. TODO remove this.
-import warnings
-warnings.filterwarnings("ignore")
+#import warnings
+#warnings.filterwarnings("ignore")
 
 
 class CamelsDataset(Dataset):
-    def __init__(self, gauge_id_file, root_dir_climate, root_dir_camels_attributes, root_dir_flow,
+    def __init__(self, gauge_id_file, camels_root,
                  dataset_properties: DatasetProperties, subsample_data, ablation_train=False, ablation_validate=False,
                  gauge_id=None, num_years=-1):
+        root_dir_flow = os.path.join(camels_root, 'usgs_streamflow')
+        root_dir_climate = os.path.join(camels_root, 'basin_mean_forcing', 'daymet')
+        root_dir_camels_attributes = os.path.join(camels_root, r'camels_attributes_v2.0')
 
-        self.gauge_id_file = pd.read_csv(gauge_id_file, dtype=str, sep='\t')
-        self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].apply(lambda gauge_id: gauge_id if len(gauge_id) == 8 else ('0'+str(gauge_id)))
-        #self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].strip()
-
-        self.normalize_inputs = False
-        self.normalize_outputs = False
+        if gauge_id_file is None:
+            self.gauge_id_file = pd.DataFrame(data={'gauge_id': [gauge_id]})
+        else:
+            self.gauge_id_file = pd.read_csv(gauge_id_file, dtype=str, sep='\t')
+            # Fix the IDs here that lost the leading zero (or maybe we should use int everywhere for gauge IDs?)
+            self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].apply(lambda gauge_id: gauge_id if len(gauge_id) == 8 else ('0'+str(gauge_id)))
 
         csv_file_attrib = [os.path.join(root_dir_camels_attributes, 'camels_' + s + '.txt') for s in
                            ['soil', 'topo', 'vege', 'geol']]
@@ -83,11 +87,11 @@ class CamelsDataset(Dataset):
             num_to_load = max(int(num_sites / subsample_data), 1)
             for idx_site in range(num_to_load):
                 print(f"Load {idx_site}/{num_to_load}")
-                self.load_one_site(dataset_properties, idx_site)
+                self.load_one_site(dataset_properties, str(self.gauge_id_file.iloc[idx_site, 0]))
         else:
             while len(self.all_items) == 0:
-                idx_site = np.random.randint(0, num_sites) if gauge_id is None else (self.gauge_id_file.loc[self.gauge_id_file['gauge_id'] == gauge_id].index[0])
-                self.load_one_site(dataset_properties, idx_site, ablation_train, ablation_validate)
+                idx_site = np.random.randint(0, num_sites)
+                self.load_one_site(dataset_properties, str(self.gauge_id_file.iloc[idx_site, 0]) if gauge_id is None else gauge_id, ablation_train, ablation_validate)
 
     @staticmethod
     def remove_nan(df):
@@ -116,9 +120,8 @@ class CamelsDataset(Dataset):
                                              right_on='gauge_id')
         return combined_attrib_file
 
-    def load_one_site(self, dataset_properties, idx_site, ablation_train=False, ablation_validate=False):
+    def load_one_site(self, dataset_properties, gauge_id, ablation_train=False, ablation_validate=False):
         """Read in climate and flow data for this site"""
-        gauge_id = str(self.gauge_id_file.iloc[idx_site, 0])
         flow_data_name = self.get_streamflow_filename(gauge_id)
         flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
                                 names=["year", "month", "day", "flow(cfs)", "qc"])
@@ -138,7 +141,9 @@ class CamelsDataset(Dataset):
         """Missing data label converted to 0/1 TODO how often is this happening? """
         d = {'A': 0, 'A:e': 0, 'M': 1}
         flow_data["qc"] = flow_data["qc"].map(d)
-        flow_data["qc"][np.isnan(flow_data["qc"])] = 1
+        #flow_data["qc"][np.isnan(flow_data["qc"])] = 1
+        if len(flow_data["qc"][np.isnan(flow_data["qc"])]) > 0:
+            raise Exception("Nan in flow_data qc")
         flow_data["qc"] = flow_data["qc"].cumsum()  # accumulate
         # Iterate over water years
         water_year_month = 10
@@ -165,9 +170,9 @@ class CamelsDataset(Dataset):
             flow_data_subset = flow_data.iloc[list(range(indices[year_idx], indices[year_idx +
                 self.years_per_sample]))].reset_index(drop=True)
             # print(flow_data_subset.columns)
-            flow_date_start = pd.datetime(int(record_start['year']), int(record_start['month']),
+            flow_date_start = datetime(int(record_start['year']), int(record_start['month']),
                                           int(record_start['day'])).date()
-            flow_date_end = pd.datetime(int(record_end['year']), int(record_end['month']),
+            flow_date_end = datetime(int(record_end['year']), int(record_end['month']),
                                         int(record_end['day'])).date()
 
             climate_data_subset = climate_data.loc[(climate_data['date'] >= flow_date_start) &
@@ -222,59 +227,6 @@ class CamelsDataset(Dataset):
     def check_dataframe(self, df):
         if df.isnull().any().any() or df.isin([-999, np.NAN, np.inf]).any().any():
             raise Exception('Bad input: nan/inf/null/-999')
-
-    """
-    def load_item(self, idx):
-        print('load ', idx, '/', self.num_samples)
-        "" "Allow for each site corresponding to multiple samples" ""
-        idx_site = self.siteyears.index.get_loc(self.siteyears.index[self.siteyears['RunningTotal'] > idx][0])
-        if idx_site == 0:
-            idx_within_site = idx
-        else:
-            idx_within_site = idx - self.siteyears.iloc[idx_site - 1, 4]
-        #  print("idx = ", idx, "idx_site = ", idx_site, ", idx_within_site = ", idx_within_site)
-
-        "" "Get file names for climate and flow" ""
-        gauge_id = str(self.signatures_frame.iloc[idx_site, 0])
-        climate_data, flow_data, flow_data_ymd = self.load_flow_climate_csv(gauge_id)
-        raise Exception("Sort out water year dates")
-        minyeartmp = flow_data_ymd[(flow_data_ymd["month"] == 1) & (flow_data_ymd["day"] == 1)].min(axis=0)["year"]
-        minyearidx = minyeartmp + idx_within_site * self.years_per_sample
-        #  Find years for flow data
-        flow_date_start = pd.datetime(minyearidx, 1, 1)
-        flow_date_end = flow_date_start + pd.Timedelta('729 days')
-
-        flow_data = flow_data.loc[(flow_data['date'] >= flow_date_start) &
-                                  (flow_data['date'] <= flow_date_end)]
-        flow_data = flow_data.reset_index(drop=True)
-
-        #  print("Extracted Flow Data")
-
-        " ""Normalize flow data" ""
-        " ""First to mm/d" ""
-
-        " ""if self.normalize_inputs:
-            ""Then normalize""
-            flow_data["flow(cfs)"] = ((flow_data["flow(cfs)"] - self.flow_norm.iloc[0, 0])/self.flow_norm.iloc[0, 1])
-            " ""
-
-        climate_data = climate_data.loc[(climate_data['date'] >= flow_date_start) &
-                                        (climate_data['date'] <= flow_date_end)]
-        climate_data = climate_data.reset_index(drop=True)
-
-        print("Av flow=" + str(np.mean(flow_data["flow(cfs)"])))
-        print("Av rain=" + str(np.mean(climate_data["prcp(mm/day)"])))
-
-        #self.check_dataframe(flow_data)
-        #self.check_dataframe(climate_data)
-
-        " ""Merge climate and flow into one array" "" #TODO do this in the datapoint instead, only for encoder
-        #hyd_data = pd.concat([flow_data.drop('date', axis=1), climate_data.drop(['date'  #, 'swe(mm)'
-        #                                                                         ], axis=1)], axis=1, join='inner')
-        self.check_dataframe(flow_data)
-        self.check_dataframe(climate_data)
-
-        return self.load_hyddata(gauge_id, flow_date_start, flow_data, climate_data)"""
 
     def load_hyddata(self, gauge_id, dataset_properties, flow_date_start, flow_data, climate_data):
         attribs = self.attrib_files.loc[self.attrib_files['gauge_id'] == gauge_id].drop('gauge_id', axis=1)
