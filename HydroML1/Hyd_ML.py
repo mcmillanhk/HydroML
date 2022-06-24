@@ -18,7 +18,7 @@ import matplotlib.ticker as mtick
 
 plotting_freq = 1
 batch_size = 128
-perturbation = 0.1  # For method of Morris
+perturbation = 0.5  # For method of Morris
 weight_decay = 0
 
 model_store_root = '.'  # For loading the states data and the train/test/validate data
@@ -1636,14 +1636,18 @@ def plot_training(train, datapoints, dataset_properties, decoder, flow, idx, los
         ax_ty.plot(validate_loss_list, color='g', alpha=0.1)
         ax_ty.plot(moving_average(validate_loss_list), color='#00AA00', alpha=0.6)
         # ax2.set_ylabel("Val. loss (green)")
+    colors = plt.cm.jet(np.linspace(0, 1, decoder.inflowlog.shape[1]))
     ax_inputrates = fig.add_subplot(rows, cols, 3)
-    ax_inputrates.plot(decoder.inflowlog)
+    for s in range(decoder.inflowlog.shape[1]):
+        ax_inputrates.plot(decoder.inflowlog[:, s], color=colors[s,:])
     ax_inputrates.set_title("a (rain distribution factors)")
     ax_outputrates = fig.add_subplot(rows, cols, 4)
-    ax_outputrates.plot(decoder.outflowlog)
+    for s in range(decoder.inflowlog.shape[1]):
+        ax_outputrates.plot(decoder.outflowlog[:, s], color=colors[s,:])
     ax_outputrates.set_title("b (outflow factors)")
     ax_stores = fig.add_subplot(rows, cols, 5)
-    ax_stores.plot(decoder.storelog.clip(0.01))
+    for s in range(decoder.inflowlog.shape[1]):
+        ax_stores.plot(decoder.storelog[:, s].clip(0.01), color=colors[s,:])
     ax_stores.set_title("Stores")
     if np.max(np.max(decoder.storelog)) > 100:  # np.min(np.min(decoder.storelog)) > 0:
         ax_stores.set_yscale('log')
@@ -2029,7 +2033,7 @@ def analyse_one_site(gauge_id, camels_path, data_root, model_load_path):
                                 decoder_properties, encoder, encoder_properties, [], None,
                                 [0], False, dataloader, [])
 
-    for encoding_idx in [7, 15]:
+    for encoding_idx in [14]:
         encoder.perturbation = (Encoding.HydroMet, encoding_idx)
         er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, decoder,
                                     decoder_properties, encoder, encoder_properties, [], None,
