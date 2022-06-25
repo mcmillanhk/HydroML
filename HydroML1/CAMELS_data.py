@@ -99,11 +99,11 @@ class CamelsDataset(Dataset):
             if name != 'gauge_id':
                 if np.isnan(df[name]).any():
                     median = np.nanmedian(df[name])
-                    df[name][np.isnan(df[name])] = median
+                    df.loc[np.isnan(df[name]), name] = median
                     print("Replacing nan with median=" + str(median) + " in " + name)
                 if np.isinf(df[name]).any():
                     max_finite = np.nanmax(df[name][np.isfinite(df[name])]) + 1
-                    df[name][np.isinf(df[name])] = max_finite
+                    df.loc[np.isinf(df[name]), name] = max_finite
                     print("Replacing inf with max + 1=" + str(max_finite) + " in " + name)
 
     @staticmethod

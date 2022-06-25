@@ -1679,12 +1679,12 @@ def compute_loss(criterion, flow, outputs):
     if steps <= 20:
         print("ERROR steps={steps}, likely mismatch with batch size.")
     spinup = int(steps / 8)
-    gt_flow_after_start = flow[:, spinup:, 0].permute(1,0) # t x b
+    gt_flow_after_start = flow[:, spinup:, 0].permute(1,0).requires_grad_(False)  # t x b
     if len(outputs.shape) == 1:
         outputs = outputs.unsqueeze(1)
 
     output_flow_after_start = outputs[spinup:, :]
-    loss, huber_loss = criterion(output_flow_after_start, torch.tensor(gt_flow_after_start))
+    loss, huber_loss = criterion(output_flow_after_start, gt_flow_after_start)
     if torch.isnan(huber_loss):
         raise Exception('huber_loss is nan')
     # Track the accuracy
@@ -2003,7 +2003,8 @@ def can_encoder_learn_sigs(subsample_data):
     train_encoder_only(encoder, dataset_train, dataset_validate, dataset_properties, encoder_properties, None)
 
 
-def analyse_one_site(gauge_id, camels_path, data_root, model_load_path):
+# 1-based indexing for encoding_list
+def analyse_one_site(gauge_id, camels_path, data_root, model_load_path, encoding_list = [8, 15]):
     #dataset_train, dataset_val, dataset_test, dataset_properties \
     #    = load_inputs(camels_path, data_root, subsample_data=1, batch_size=1, load_train=True, load_validate=True, load_test=False,
     #                  encoder_years=1, decoder_years=1)
@@ -2026,16 +2027,12 @@ def analyse_one_site(gauge_id, camels_path, data_root, model_load_path):
 
     # Drop all but one so we get the same encoding every time
     gauge_enc = enc_inputs[int(gauge_id)]
-    enc_idx = min(7, gauge_enc[0].shape[0]-1)
-    enc_inputs[int(gauge_id)] = (gauge_enc[0][enc_idx:enc_idx+1, :, :], gauge_enc[1][enc_idx:enc_idx+1, :])
+    enc_input_idx = min(7, gauge_enc[0].shape[0]-1)
+    enc_inputs[int(gauge_id)] = (gauge_enc[0][enc_input_idx:enc_input_idx+1, :, :], gauge_enc[1][enc_input_idx:enc_input_idx+1, :])
 
-    er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, decoder,
-                                decoder_properties, encoder, encoder_properties, [], None,
-                                [0], False, dataloader, [])
-
-    for encoding_idx in [14]:
-        encoder.perturbation = (Encoding.HydroMet, encoding_idx)
+    for encoding_idx in [None] + [x-1 for x in encoding_list]:  # None = no perturbation. Note zero-based indexing.
+        encoder.perturbation = (Encoding.HydroMet, encoding_idx) if encoding_idx is not None else None
         er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, decoder,
-                                    decoder_properties, encoder, encoder_properties, [], None,
+                                    decoder_properties, encoder, encoder_properties, [-1], None,
                                     [0], False, dataloader, [])
 

@@ -61,7 +61,7 @@ class HydModelNet(nn.Module):
     def make_inflow_layer(intermediate_output_dim, output_dim):
         layer = nn.Linear(intermediate_output_dim, output_dim)
         #layer.bias.data -= 1  # Make the initial values generally small
-        layers = [layer, nn.Softmax()]  # output is a unit vector with elements in 0..1
+        layers = [layer, nn.Softmax(dim=1)]  # output is a unit vector with elements in 0..1
         return nn.Sequential(*layers)
 
     @staticmethod
