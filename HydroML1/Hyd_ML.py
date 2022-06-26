@@ -1451,7 +1451,7 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
         print(f'Median validation NSE epoch {epoch}/{output_epochs} = {np.median(val_nse):.3f} training NSE {np.median(train_nse):.3f}')
 
         if epoch % 20 == 19 and not ablation_test and plotting_freq > 0:
-            test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties, data_root)
+            test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties, states)
 
         if False:
             val_median = np.median(val_nse)

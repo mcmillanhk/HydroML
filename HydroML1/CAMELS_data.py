@@ -51,7 +51,6 @@ class CamelsDataset(Dataset):
         types_dict.update({col: np.float64 for col in col_names if col not in types_dict})
 
         self.signatures_frame = pd.read_csv(csv_file, sep=';', dtype=types_dict)
-        num_sites_init = len(self.signatures_frame)
         self.signatures_frame.drop('slope_fdc', axis=1, inplace=True)
         self.signatures_frame.dropna(inplace=True)
 
@@ -62,10 +61,6 @@ class CamelsDataset(Dataset):
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
         self.years_per_sample = num_years
-
-        """number of samples depends on years/sample. """
-        num_sites = len(self.gauge_id_file)
-        print(f"Dropped {num_sites_init-num_sites} of {num_sites_init} sites because of nan")
 
         for name, normalizer in dataset_properties.sig_normalizers.items():
             self.signatures_frame[name] = self.signatures_frame[name].transform(lambda x: x * normalizer)
@@ -82,6 +77,8 @@ class CamelsDataset(Dataset):
                                                "tmax_std", "tmin_std", "vp_std"])
         self.num_samples = 0
         self.all_items = []
+
+        num_sites = len(self.gauge_id_file)
 
         if subsample_data > 0:
             num_to_load = max(int(num_sites / subsample_data), 1)
