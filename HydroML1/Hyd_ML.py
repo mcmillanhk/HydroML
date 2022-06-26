@@ -315,9 +315,10 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
                 extra_sig_names = datapoints.extra_signatures.columns.tolist()
 
 
-    encodings_save = {'gauge_ids': gauge_ids, 'hydro_encodings': hydro_encodings, 'full_encodings': full_encodings }
-    with open(r"C:\hydro\encodings.pkl", "wb") as f:
-        pickle.dump(encodings_save, f)
+    if False:  # Export all signatures to file
+        encodings_save = {'gauge_ids': gauge_ids, 'hydro_encodings': hydro_encodings, 'full_encodings': full_encodings }
+        with open(r"encodings.pkl", "wb") as f:
+            pickle.dump(encodings_save, f)
 
     print (f"max_vals={max_vals}")
     print (f"max_gauge={max_gauge}")
@@ -1785,10 +1786,10 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 # Set encoder and decoder hyperparameters in Util.py
 # A few other parameters are hardcoded in this file: batch size at top, # years' data per datapoint below (separate for
 # encoder and decoder)
-def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:/hydro/basin_dataset_public_v1p2",
-                          model_load_path = 'c:/hydro/pytorch_models/113-E1200/',
-                          model_store_path = 'c:/hydro/pytorch_models/out/',
-                          data_root=r'C:/hydro/HydroML/data'):
+def train_test_everything(subsample_data, seed, camels_path,
+                          model_load_path,
+                          model_store_path,
+                          data_root):
     torch.manual_seed(seed)
 
     train_loader, validate_loader, test_loader, dataset_properties \
@@ -1814,14 +1815,13 @@ def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:/hydro/basin
             dataset_properties, model_store_path, (subsample_data <= 0), states)
 
 
-def reduce_encoding(subsample_data):
+def reduce_encoding(subsample_data, model_load_path, model_io_path):
     train_loader, validate_loader, test_loader, dataset_properties \
         = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
                       load_test=False, encoder_years=1, decoder_years=1)
 
-    model_load_path = 'c:/hydro/pytorch_models/113-E1200/'
-    model_store_path = 'c:/hydro/pytorch_models/out/'
-    temp_store_path = 'c:/hydro/pytorch_models/temp/'
+    model_store_path = model_io_path + '/out/'
+    temp_store_path = model_io_path + '/temp/'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 

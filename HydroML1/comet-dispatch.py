@@ -7,4 +7,4 @@ if __name__ == '__main__':
     #search_algo_str = sys.argv[2]
 
     train_test_everything(10, 1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
-                          None, data_root=r"/home/hilarymcmillan/hydro/HydroML/data")
+                          None, 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data")
