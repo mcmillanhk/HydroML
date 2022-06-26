@@ -1588,6 +1588,7 @@ class EpochRunner:
             # idx_rain = get_indices(['prcp(mm/day)'], hyd_data_labels)[0]
             if idx in plot_idx:
                 try:
+                    # The losses do not include this run (haven't decided whether to append to train or validate list yet)
                     plot_training(train, datapoints, dataset_properties, decoder, gt_flow, idx,
                                   loss_list, output_model_flow, len(data_loader.dec), validate_loss_list, nse_err)
                 except Exception as e:
@@ -1617,7 +1618,7 @@ def plot_training(train, datapoints, dataset_properties, decoder, flow, idx, los
 
     last_losses = np.array(loss_list)
     start = len(last_losses) - min(len(last_losses), 50)
-    last_nse = np.mean(last_losses[start:])
+    last_nse = np.mean(last_losses[start:]) if len(last_losses) > 0 else -1
     train_string = "Train" if train else "Validation"
     print(f'{train_string}: Step {idx} / {total_step}, Train NSE: {last_nse}')
     rows = 2
@@ -2032,6 +2033,6 @@ def analyse_one_site(gauge_id, camels_path, data_root, model_load_path, encoding
     for encoding_idx in [None] + [x-1 for x in encoding_list]:  # None = no perturbation. Note zero-based indexing.
         encoder.perturbation = (Encoding.HydroMet, encoding_idx) if encoding_idx is not None else None
         er.run_dataloader_epoch(False, enc_inputs, nse_loss, dataset_properties, decoder,
-                                    decoder_properties, encoder, encoder_properties, [-1], None,
+                                    decoder_properties, encoder, encoder_properties, [], None,
                                     [0], False, dataloader, [])
 
