@@ -1369,7 +1369,7 @@ def check_dataloaders(train_loader, validate_loader):
 # Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
-                          model_store_path, ablation_test, states):
+                          model_store_path, ablation_test, states, data_root):
     coupled_learning_rate = 0.01 if ablation_test else 0.0003
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -1789,7 +1789,9 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 def train_test_everything(subsample_data, seed, camels_path,
                           model_load_path,
                           model_store_path,
-                          data_root):
+                          data_root,
+                          encoder_properties=EncoderProperties(), decoder_properties=DecoderProperties()
+                          ):
     torch.manual_seed(seed)
 
     train_loader, validate_loader, test_loader, dataset_properties \
@@ -1809,10 +1811,11 @@ def train_test_everything(subsample_data, seed, camels_path,
 
     decoder, decoder_properties, encoder, encoder_properties = load_network(load_decoder, load_encoder,
                                                                             dataset_properties,
-                                                                            model_load_path, batch_size)
+                                                                            model_load_path, batch_size,
+                                                                            encoder_properties, decoder_properties)
 
     train_encoder_decoder(1200, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
-            dataset_properties, model_store_path, (subsample_data <= 0), states)
+            dataset_properties, model_store_path, (subsample_data <= 0), states, data_root)
 
 
 def reduce_encoding(subsample_data, model_load_path, model_io_path):
@@ -1864,7 +1867,7 @@ def reduce_encoding(subsample_data, model_load_path, model_io_path):
         encoder_properties.dropout_indices.append(best_idx)
 
 
-def load_network(load_decoder, load_encoder, dataset_properties, model_load_path, batch_size):
+def load_network(load_decoder, load_encoder, dataset_properties, model_load_path, batch_size, encoder_properties=None, decoder_properties=None):
     if load_encoder:
         encoder_load_path = model_load_path + '/encoder.ckpt'
         encoder_properties_load_path = model_load_path + '/encoder_properties.pkl'
@@ -1872,7 +1875,7 @@ def load_network(load_decoder, load_encoder, dataset_properties, model_load_path
         decoder_load_path = model_load_path + '/decoder.ckpt'
         decoder_properties_load_path = model_load_path + '/decoder_properties.pkl'
 
-    encoder_properties = EncoderProperties()
+
     #with open(encoder_properties_load_path, 'wb') as outp:
     #    pickle.dump(encoder_properties, outp)
     if load_encoder:
@@ -1881,7 +1884,6 @@ def load_network(load_decoder, load_encoder, dataset_properties, model_load_path
             if not hasattr(encoder_properties, 'pretrain'):
                 encoder_properties.pretrain = False
 
-    decoder_properties = DecoderProperties()
     #with open(decoder_properties_load_path, 'wb') as outp:
     #    pickle.dump(decoder_properties, outp)
     if load_decoder:
