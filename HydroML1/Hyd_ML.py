@@ -18,11 +18,8 @@ import matplotlib.ticker as mtick
 
 plotting_freq = 1
 batch_size = 128
-perturbation = 0.5  # For method of Morris
+perturbation = 0.1  # For method of Morris
 weight_decay = 0
-
-model_store_root = '.'  # For loading the states data and the train/test/validate data
-
 
 def savefig(name, plt):
     fig_output = r"figures"
@@ -44,8 +41,8 @@ def nse_loss(output, target):  # both inputs t x b
     return numpy_nse(loss.detach().numpy()), huber_loss
 
 
-def states():
-    return shp.Reader(model_store_root + "/states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
+def load_states(data_root):
+    return shp.Reader(data_root + "/states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
 
 
 def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_train, load_validate, load_test, num_years):
@@ -56,19 +53,19 @@ def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_t
     # Camels Dataset
     dataset_properties = DatasetProperties()
 
-    train_dataset = Cd.CamelsDataset(csv_file_train, camels_root, dataset_properties,
+    train_dataset = Cd.CamelsDataset(csv_file_train, camels_root, data_root, dataset_properties,
                                      subsample_data=subsample_data, ablation_train=True, num_years=num_years) if load_train else None
 
     train_loader = None if train_dataset is None else DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-    test_dataset = Cd.CamelsDataset(csv_file_test, camels_root,
+    test_dataset = Cd.CamelsDataset(csv_file_test, camels_root, data_root,
                                     dataset_properties, subsample_data=subsample_data, num_years=num_years) if load_test else None
 
     test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False,
                                                                collate_fn=collate_fn)
 
     gauge_id = train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data <= 0 else None
-    validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, camels_root,
+    validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, camels_root, data_root,
                                         dataset_properties, subsample_data=subsample_data, ablation_validate=True,
                                         gauge_id=gauge_id, num_years=num_years) if load_validate else None
 
@@ -264,7 +261,7 @@ def cat(n1, n2):
 
 # TODO use encoding input dict?
 def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_properties: EncoderProperties,
-                 dataset_properties: DatasetProperties):
+                 dataset_properties: DatasetProperties, states):
     encoder.eval()
     full_encodings = None
     hydro_encodings = None
@@ -322,8 +319,6 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
     with open(r"C:\hydro\encodings.pkl", "wb") as f:
         pickle.dump(encodings_save, f)
 
-    sf = states()
-
     print (f"max_vals={max_vals}")
     print (f"max_gauge={max_gauge}")
 
@@ -342,7 +337,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
         for i in range(encodings.shape[1]):
             ax = fig.add_subplot(cols, rows, i+1)
 
-            plot_states(ax, sf)
+            plot_states(ax, states)
 
             ax.axes.xaxis.set_ticklabels([])
             ax.axes.yaxis.set_ticklabels([])
@@ -640,7 +635,7 @@ def label_axis_dates(ax):
     ax.axes.xaxis.set_ticklabels(['Oct', 'Jan', 'Apr', 'Jul', 'Oct'])
 
 
-def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object], dataset_properties: DatasetProperties):
+def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object], dataset_properties: DatasetProperties, states):
     for model in models:
         model.encoder.eval()
         model.decoder.eval()
@@ -698,14 +693,14 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
 
     for model in models:
         res = results[model.name]
-        plot_nse_map(f"{model.name} NSE", res.lats, res.lons, res.nse_err)
+        plot_nse_map(f"{model.name} NSE", res.lats, res.lons, res.nse_err, states)
         res.important_stores = classify_stores(model.name, res.log_a, res.log_b, res.log_temp)
 
         for store_id in range(num_stores):
             plot_nse_map(f"{model.name}: max a[{store_id+1}]",
                          np.array([lat for lat in res.gauge_lat.values()]),
                          np.array([lon for lon in res.gauge_lon.values()]),
-                         np.array([a[store_id] for a in res.max_a.values()]))
+                         np.array([a[store_id] for a in res.max_a.values()]), states)
 
 
     for model1 in models:
@@ -714,7 +709,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 title = f"Difference in NSE {model1.name}-{model2.name}"
                 res1 = results[model1.name]
                 res2 = results[model2.name]
-                plot_nse_map(title, res1.lats, res1.lons, res1.nse_err-res2.nse_err)
+                plot_nse_map(title, res1.lats, res1.lons, res1.nse_err-res2.nse_err, states)
 
     test_encoding_effect(results, data_loaders, models, dataset_properties)
 
@@ -819,10 +814,10 @@ def scatter_ab(fig, idx, a, aname, b, bname, logy=False):
             ax.set_yscale('log')
 
 
-def plot_nse_map(title, lats, lons, nse_err):
+def plot_nse_map(title, lats, lons, nse_err, states):
     fig = plt.figure(figsize=(7, 4))
     ax = fig.add_subplot(1, 1, 1)
-    plot_states(ax, states())
+    plot_states(ax, states)
     colorplot_latlong(ax, nse_err, f'{title}\nRange {nse_err.min():.3f} to {nse_err.max():.3f}', lats, lons, True)
     savefig(title, plt)
     plt.show()
@@ -1373,7 +1368,7 @@ def check_dataloaders(train_loader, validate_loader):
 # Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
-                          model_store_path, ablation_test):
+                          model_store_path, ablation_test, states):
     coupled_learning_rate = 0.01 if ablation_test else 0.0003
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
@@ -1398,7 +1393,7 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
 
     #Should be random initialization
     if not ablation_test and output_epochs > 1:
-        test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
+        test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties, states)
 
     randomize_encoding = False
     train_enc_inputs = all_encoder_inputs(train_loader, encoder_properties, dataset_properties)
@@ -1420,9 +1415,6 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
                                 decoder_properties, encoder, encoder_properties, [], optimizer,
                                 validate_plot_idx, randomize_encoding, validate_loader,
                                 [])
-        print(f'Init median validation NSE = {np.median(init_val_nse):.3f}')
-    else:
-        init_val_nse = [-1]
 
     max_val_nse = init_val_nse
 
@@ -1438,7 +1430,7 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
                 model.decoder_properties = decoder_properties
                 model.encoder = encoder
                 model.encoder_properties = encoder_properties
-                test_encoder_decoder_nse((train_loader, validate_loader), [model], dataset_properties)
+                test_encoder_decoder_nse((train_loader, validate_loader), [model], dataset_properties, states)
 
         train_nse = er.run_dataloader_epoch(True, train_enc_inputs, criterion, dataset_properties, decoder,
                                          decoder_properties, encoder, encoder_properties, loss_list, optimizer,
@@ -1458,21 +1450,25 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
         print(f'Median validation NSE epoch {epoch}/{output_epochs} = {np.median(val_nse):.3f} training NSE {np.median(train_nse):.3f}')
 
         if epoch % 20 == 19 and not ablation_test and plotting_freq > 0:
-            test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties)
+            test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties, data_root)
 
-        #if ablation_test:
-        val_median = np.median(val_nse)
-        max_val_median = np.median(max_val_nse)
-        if val_median > max_val_median:
-            max_val_nse = val_nse
-        elif val_median < 0.9*max_val_median and epoch > 10:
-            break
+        if False:
+            val_median = np.median(val_nse)
+            max_val_median = np.median(max_val_nse) if len(max_val_nse) > 0 else -1
+            if val_median > max_val_median:
+                max_val_nse = val_nse
+            elif val_median < 0.9*max_val_median and epoch > 10:
+                break
 
-        torch.save(encoder.state_dict(), model_store_path + '/encoder.ckpt')
-        torch.save(decoder.state_dict(), model_store_path + '/decoder.ckpt')
-        with open(model_store_path+'/encoder_properties.pkl', 'wb') as outp:
+        model_store_path_inc = model_store_path + f"/Epoch{100*(epoch//100)}"
+        if not os.path.exists(model_store_path_inc):
+            os.mkdir(model_store_path_inc)
+
+        torch.save(encoder.state_dict(), model_store_path_inc + '/encoder.ckpt')
+        torch.save(decoder.state_dict(), model_store_path_inc + '/decoder.ckpt')
+        with open(model_store_path_inc+'/encoder_properties.pkl', 'wb') as outp:
             pickle.dump(encoder_properties, outp)
-        with open(model_store_path+'/decoder_properties.pkl', 'wb') as outp:
+        with open(model_store_path_inc+'/decoder_properties.pkl', 'wb') as outp:
             pickle.dump(decoder_properties, outp)
 
     return init_val_nse, max_val_nse
@@ -1795,12 +1791,11 @@ def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:\\hydro\\bas
                           data_root=r'C:\\hydro\\HydroML\\data'):
     torch.manual_seed(seed)
 
-    global model_store_root # TODO pass through path somehow
-    model_store_root = data_root
-
     train_loader, validate_loader, test_loader, dataset_properties \
         = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
                       load_test=False, encoder_years=1, decoder_years=1)
+
+    states = load_states(data_root)
 
     if False:
         preview_data(train_loader, hyd_data_labels, sig_labels)
@@ -1816,7 +1811,7 @@ def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:\\hydro\\bas
                                                                             model_load_path, batch_size)
 
     train_encoder_decoder(1200, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
-            dataset_properties, model_store_path, (subsample_data <= 0))
+            dataset_properties, model_store_path, (subsample_data <= 0), states)
 
 
 def reduce_encoding(subsample_data):
@@ -1946,9 +1941,6 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
         = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
                       encoder_years=1, decoder_years=1)
 
-    global model_store_root # TODO pass through path somehow
-    model_store_root = data_root
-
     all_datasets = [dataset_train, dataset_val, dataset_test]
     datasets = []
     for dataset in all_datasets:
@@ -1956,6 +1948,7 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
             datasets.append(dataset)
     test = dataset_test if dataset_test else dataset_val
 
+    states = load_states(data_root)
 
     models = []
     for model_load_path, model_name in model_load_paths:
@@ -1965,7 +1958,7 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
             load_network(True, True, dataset_properties, model_load_path, batch_size)
         models.append(model)
 
-    test_encoder_decoder_nse(datasets, models, dataset_properties)
+    test_encoder_decoder_nse(datasets, models, dataset_properties, states)
 
     er = EpochRunner()
 
@@ -1979,7 +1972,7 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
         print(f"Median NSE {model.name}: {np.median(model.nse)} mean {np.mean(model.nse)}")
 
         print(f"Encoder from {model.name}:")
-        test_encoder(datasets, model.encoder, model.encoder_properties, dataset_properties)
+        test_encoder(datasets, model.encoder, model.encoder_properties, dataset_properties, states)
 
     fig = plt.figure(figsize=(12, 3))
     ax_boxwhisker = fig.add_subplot(1, 2, 2)
@@ -2003,17 +1996,10 @@ def can_encoder_learn_sigs(subsample_data):
     train_encoder_only(encoder, dataset_train, dataset_validate, dataset_properties, encoder_properties, None)
 
 
-# 1-based indexing for encoding_list
+# 1-based indexing for \encoding_list
 def analyse_one_site(gauge_id, camels_path, data_root, model_load_path, encoding_list = [8, 15]):
-    #dataset_train, dataset_val, dataset_test, dataset_properties \
-    #    = load_inputs(camels_path, data_root, subsample_data=1, batch_size=1, load_train=True, load_validate=True, load_test=False,
-    #                  encoder_years=1, decoder_years=1)
-
-    global model_store_root # TODO pass through path somehow
-    model_store_root = data_root
-
     dataset_properties = DatasetProperties()
-    dataset = Cd.CamelsDataset(None, camels_path, dataset_properties, 1, False, False, gauge_id=gauge_id, num_years=1)
+    dataset = Cd.CamelsDataset(None, camels_path, data_root, dataset_properties, 1, False, False, gauge_id=gauge_id, num_years=1)
     dataloader = Object()
     dataloader.enc = DataLoader(dataset=dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
     dataloader.dec = dataloader.enc

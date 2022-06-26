@@ -18,7 +18,7 @@ cfs2mm = 2.446575546
 
 
 class CamelsDataset(Dataset):
-    def __init__(self, gauge_id_file, camels_root,
+    def __init__(self, gauge_id_file, camels_root, data_root,
                  dataset_properties: DatasetProperties, subsample_data, ablation_train=False, ablation_validate=False,
                  gauge_id=None, num_years=-1):
         root_dir_flow = os.path.join(camels_root, 'usgs_streamflow')
@@ -55,7 +55,7 @@ class CamelsDataset(Dataset):
         self.signatures_frame.drop('slope_fdc', axis=1, inplace=True)
         self.signatures_frame.dropna(inplace=True)
 
-        extra_sigs = [r'C:\hydro\extra_sigs\gw_array.csv', r'C:\hydro\extra_sigs\of_array2.csv']
+        extra_sigs = [data_root + r'/extra_sigs/gw_array.csv', data_root + r'extra_sigs/of_array2.csv']
         self.extra_sigs_files = CamelsDataset.read_attributes(extra_sigs, ',')
         CamelsDataset.remove_nan(self.extra_sigs_files)
 
