@@ -851,9 +851,8 @@ def all_encoder_inputs(data_loader: DataLoader, encoder_properties: EncoderPrope
         for b in range(len(datapoints.gauge_id_int)):
             gauge_id = datapoints.gauge_id_int[b]
             if gauge_id in encoder_inputs:
-                for i in range(2):
-                    encoder_inputs[gauge_id] = (try_select_cat(b, 0, encoder_inputs, gauge_id, hyd_data),
-                                                try_select_cat(b, 1, encoder_inputs, gauge_id, hyd_data))
+                encoder_inputs[gauge_id] = (try_select_cat(b, 0, encoder_inputs, gauge_id, hyd_data),
+                                            try_select_cat(b, 1, encoder_inputs, gauge_id, hyd_data))
             else:
                 encoder_inputs[gauge_id] = (try_select(b, hyd_data[0]), try_select(b, hyd_data[1]))
     return encoder_inputs
