@@ -25,7 +25,7 @@ def savefig(name, plt):
     fig_output = r"figures"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
-    plt.savefig(fig_output + r'\\' + name + '.svg')
+    plt.savefig(fig_output + r'/' + name + '.svg')
 
 
 # Return NSE and huber(1-NSE), which is what we minimize
@@ -1785,10 +1785,10 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 # Set encoder and decoder hyperparameters in Util.py
 # A few other parameters are hardcoded in this file: batch size at top, # years' data per datapoint below (separate for
 # encoder and decoder)
-def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:\\hydro\\basin_dataset_public_v1p2",
-                          model_load_path = 'c:\\hydro\\pytorch_models\\113-E1200\\',
-                          model_store_path = 'c:\\hydro\\pytorch_models\\out\\',
-                          data_root=r'C:\\hydro\\HydroML\\data'):
+def train_test_everything(subsample_data=1, seed=1, camels_path=r"C:/hydro/basin_dataset_public_v1p2",
+                          model_load_path = 'c:/hydro/pytorch_models/113-E1200/',
+                          model_store_path = 'c:/hydro/pytorch_models/out/',
+                          data_root=r'C:/hydro/HydroML/data'):
     torch.manual_seed(seed)
 
     train_loader, validate_loader, test_loader, dataset_properties \
@@ -1819,9 +1819,9 @@ def reduce_encoding(subsample_data):
         = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
                       load_test=False, encoder_years=1, decoder_years=1)
 
-    model_load_path = 'c:\\hydro\\pytorch_models\\113-E1200\\'
-    model_store_path = 'c:\\hydro\\pytorch_models\\out\\'
-    temp_store_path = 'c:\\hydro\\pytorch_models\\temp\\'
+    model_load_path = 'c:/hydro/pytorch_models/113-E1200/'
+    model_store_path = 'c:/hydro/pytorch_models/out/'
+    temp_store_path = 'c:/hydro/pytorch_models/temp/'
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
@@ -1834,8 +1834,8 @@ def reduce_encoding(subsample_data):
     for iter in range(encoder_properties.encoding_dim(), 0, -1):
         best_nse = -1
         best_idx = -1
-        this_model_store_path = model_store_path + f"{iter}\\"
-        next_model_store_path= model_store_path + f"{iter-1}\\"
+        this_model_store_path = model_store_path + f"{iter}/"
+        next_model_store_path= model_store_path + f"{iter-1}/"
         for test_idx in range(encoder_properties.encoding_dim()):
 
             decoder, decoder_properties, encoder, encoder_properties = load_network(True, True,

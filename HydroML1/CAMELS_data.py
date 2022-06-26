@@ -55,7 +55,7 @@ class CamelsDataset(Dataset):
         self.signatures_frame.drop('slope_fdc', axis=1, inplace=True)
         self.signatures_frame.dropna(inplace=True)
 
-        extra_sigs = [data_root + r'/extra_sigs/gw_array.csv', data_root + r'extra_sigs/of_array2.csv']
+        extra_sigs = [data_root + r'/extra_sigs/gw_array.csv', data_root + r'/extra_sigs/of_array2.csv']
         self.extra_sigs_files = CamelsDataset.read_attributes(extra_sigs, ',')
         CamelsDataset.remove_nan(self.extra_sigs_files)
 
