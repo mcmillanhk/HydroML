@@ -139,8 +139,9 @@ class CamelsDataset(Dataset):
         d = {'A': 0, 'A:e': 0, 'M': 1}
         flow_data["qc"] = flow_data["qc"].map(d)
         #flow_data["qc"][np.isnan(flow_data["qc"])] = 1
-        if len(flow_data["qc"][np.isnan(flow_data["qc"])]) > 0:
-            raise Exception("Nan in flow_data qc")
+        num_nan = len(flow_data["qc"][np.isnan(flow_data["qc"])])
+        if num_nan > 0:
+            raise Exception(f"Nan in flow_data qc {num_nan=} {gauge_id=}")
         flow_data["qc"] = flow_data["qc"].cumsum()  # accumulate
         # Iterate over water years
         water_year_month = 10
