@@ -138,7 +138,7 @@ class CamelsDataset(Dataset):
         """Missing data label converted to 0/1 TODO how often is this happening? """
         d = {'A': 0, 'A:e': 0, 'M': 1}
         flow_data["qc"] = flow_data["qc"].map(d)
-        #flow_data["qc"][np.isnan(flow_data["qc"])] = 1
+        flow_data["qc"][np.isnan(flow_data["qc"])] = 1  # Flag as missing
         num_nan = len(flow_data["qc"][np.isnan(flow_data["qc"])])
         if num_nan > 0:
             raise Exception(f"Nan in flow_data qc {num_nan=} {gauge_id=}")
