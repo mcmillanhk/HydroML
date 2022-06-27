@@ -20,6 +20,6 @@ if __name__ == '__main__':
     decoder_properties.hyd_model_net_props.flow_between_stores = args.flow_between_stores
     decoder_properties.hyd_model_net_props.store_dim = args.num_stores
 
-    train_test_everything(10, 1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
+    train_test_everything(1, 1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
                           None, 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data",
                           encoder_properties=encoder_properties, decoder_properties=decoder_properties)

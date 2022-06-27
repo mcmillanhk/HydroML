@@ -1377,6 +1377,9 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
     if not os.path.exists(model_store_path):
         os.mkdir(model_store_path)
 
+    with open(model_store_path + 'progress.log', 'w') as f:
+        f.write('LR={coupled_learning_rate}')
+
     # Low weight decay on output layers
     decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
               {'params': decoder.inflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
@@ -1448,7 +1451,10 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
                                        validate_loss_list)
         validate_loss_list.extend(val_nse)
 
-        print(f'Median validation NSE epoch {epoch}/{output_epochs} = {np.median(val_nse):.3f} training NSE {np.median(train_nse):.3f}')
+        msg = f'Median validation NSE epoch {epoch}/{output_epochs} = {np.median(val_nse):.3f} training NSE {np.median(train_nse):.3f}'
+        print(msg)
+        with open(model_store_path + 'progress.log', 'a') as f:
+            f.write(msg)
 
         if epoch % 20 == 19 and not ablation_test and plotting_freq > 0:
             test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties, states)
