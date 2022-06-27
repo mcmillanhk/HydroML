@@ -1787,7 +1787,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 # Jointly train encoder-decoder from either random initialization, or from a previously-saved model.
 # \subsample_data: reduce data by this amount (1=all, 2=half, etc.). Useful for quickly testing changes.
 # \model_load_path: get pretrained model from here (see models directory in git repo).
-# \camels_path: path to Camels-US dataset
+# \camels_path: path to Camels-US dataset (and unzip CAMELS ATTRIBUTES inside this)
 # \data_root: Path to directory from git containing train/test/validate split plus US states outline
 # Set encoder and decoder hyperparameters in Util.py
 # A few other parameters are hardcoded in this file: batch size at top, # years' data per datapoint below (separate for
