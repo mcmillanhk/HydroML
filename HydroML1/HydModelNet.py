@@ -188,7 +188,7 @@ class HydModelNet(nn.Module):
 
             if self.log_ab:
                 self.ablogs.log_a[:, t, :] = a.detach()
-                self.ablogs.log_b[:, t, :] = b.detach()
+                self.ablogs.log_b[:, t, :] = b[(-num_stores):].detach()
                 self.ablogs.log_aet[:, t, :] = et.detach()
 
         if error_check:
@@ -197,4 +197,4 @@ class HydModelNet(nn.Module):
             if torch.max(np.isnan(flows.data)) == 1:
                 raise Exception("Nan in flow")
 
-        return flows, init_stores - stores
+        return flows, init_stores - stores, b_interstore if self.flow_between_stores else None

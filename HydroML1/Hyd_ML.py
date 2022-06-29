@@ -1368,7 +1368,7 @@ def check_dataloaders(train_loader, validate_loader):
 def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
                           model_store_path, ablation_test, states, data_root):
-    coupled_learning_rate = 0.01 if ablation_test else 0.00015
+    coupled_learning_rate = 0.01 if ablation_test else 0.0003
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
@@ -1558,7 +1558,7 @@ class EpochRunner:
             else:
                 all_enc = one_encoding_per_run(datapoints.gauge_id_int, encoder, encoder_properties, dataset_properties, all_enc_inputs)
 
-            output_model_flow, store_error = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
+            output_model_flow, store_error, interstore = run_encoder_decoder(decoder, encoder, datapoints, encoder_properties, decoder_properties,
                                           dataset_properties, all_enc)
 
             gt_flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
@@ -1566,9 +1566,16 @@ class EpochRunner:
 
             hl = torch.nn.HuberLoss(delta=5)
             store_loss = hl(store_error, torch.zeros(store_error.shape).double())
-            weight = 0.01 * huber_loss.detach().mean() / (huber_loss.detach().mean() + store_loss.detach().mean())
+            weight = 0.02 * huber_loss.detach() / (huber_loss.detach() + store_loss.detach())
             #print(f"{weight=}")
             huber_loss += store_loss * weight
+
+            if interstore is not None:
+                hl = torch.nn.HuberLoss(delta=0.01)
+                interstore_loss = hl(interstore, torch.zeros(interstore.shape).double())
+                weight = 0.02 * huber_loss.detach() / max(interstore_loss.detach(), 1e-6)
+                # print(f"{weight=}")
+                huber_loss += interstore_loss * weight
 
             local_loss_list.extend(nse_err.tolist())
 

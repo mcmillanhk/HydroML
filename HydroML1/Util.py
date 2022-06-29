@@ -197,7 +197,7 @@ class DecoderProperties:
             self.hidden_dim = 256
             self.flownet_intermediate_output_dim = 32
             self.num_layers = 4
-            self.flow_between_stores = False  # Allow flow between stores; otherwise they're all connected only to out flow
+            self.flow_between_stores = True  # Allow flow between stores; otherwise they're all connected only to out flow
             self.decoder_include_stores = True
             self.decoder_include_signatures = False
             self.decoder_include_attributes = False
