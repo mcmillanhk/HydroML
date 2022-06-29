@@ -527,7 +527,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                 all_enc = one_encoding_per_run(datapoints.gauge_id_int, model.encoder, model.encoder_properties,
                                                dataset_properties,
                                                res.enc_inputs)
-                outputs_ref, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
+                outputs_ref, _, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
                                                  model.decoder_properties, dataset_properties, all_enc)
                 flow_ref = datapoints.flow_data
                 log_ab_ref = model.decoder.ablogs
@@ -544,7 +544,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                         model.encoder.perturbation = (encoding_id, encoding_idx)
                         all_enc_perturbed = one_encoding_per_run(datapoints.gauge_id_int, model.encoder, model.encoder_properties, dataset_properties,
                                                                  res.enc_inputs)
-                        outputs_perturbed, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
+                        outputs_perturbed, _, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
                                                                    model.decoder_properties, dataset_properties, all_enc_perturbed)
                         log_a_perturbed[encoding_idx] = model.decoder.ablogs.log_a
                         log_b_perturbed[encoding_idx] = model.decoder.ablogs.log_b
@@ -672,7 +672,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 all_enc = one_encoding_per_run(datapoints.gauge_id_int, model.encoder, model.encoder_properties, dataset_properties,
                                                res.enc_inputs)
 
-                outputs, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
+                outputs, _, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
                                               model.decoder_properties, dataset_properties, all_enc)
                 flow = datapoints.flow_data
                 loss, _ = compute_loss(nse_loss, flow, outputs)
