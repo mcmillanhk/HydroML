@@ -188,7 +188,7 @@ class HydModelNet(nn.Module):
 
             if self.log_ab:
                 self.ablogs.log_a[:, t, :] = a.detach()
-                self.ablogs.log_b[:, t, :] = b[(-num_stores):].detach()
+                self.ablogs.log_b[:, t, :] = b[:, (-num_stores):].detach()
                 self.ablogs.log_aet[:, t, :] = et.detach()
 
         if error_check:
