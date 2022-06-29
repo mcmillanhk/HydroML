@@ -12,6 +12,8 @@ if __name__ == '__main__':
                         help='Whether to model flow_between_stores')
     parser.add_argument('--num_stores', type=int, default=8, nargs='?',
                         help='')
+    parser.add_argument('--reload', type=int, default=0, nargs='?',
+                        help='Whether to reload the last model from the same directory (E200)')
 
     args = parser.parse_args()
 
@@ -21,5 +23,5 @@ if __name__ == '__main__':
     decoder_properties.hyd_model_net_props.store_dim = args.num_stores
 
     train_test_everything(1, 1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
-                          'models/Epoch200', 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data",
+                          'models/Epoch200' if args.reload else None, 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data",
                           encoder_properties=encoder_properties, decoder_properties=decoder_properties)
