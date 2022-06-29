@@ -27,6 +27,11 @@ def savefig(name, plt):
         os.mkdir(fig_output)
     plt.savefig(fig_output + r'/' + name + '.svg')
 
+def save_show_close(name, plt):
+    savefig(name, plt)
+    plt.show()
+    plt.close()
+
 
 # Return NSE and huber(1-NSE), which is what we minimize
 def nse_loss(output, target):  # both inputs t x b
@@ -346,8 +351,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
             encodingvec = encodings[:, i]
             colorplot_latlong(ax, encodingvec, f'{label} {i+1}', lats, lons, False, 5)
 
-        savefig(label, plt)
-        plt.show()
+        save_show_close(label, plt)
 
         rank = False
         M = stats.spearmanr(encodings).correlation if rank else np.corrcoef(encodings, rowvar=False)
@@ -451,8 +455,7 @@ def print_plot_correlations(label, sig_name, dataset_properties, encodings, sigs
 
     ax.set_title(title)
     fig.tight_layout()
-    savefig(title, plt)
-    plt.show()
+    save_show_close(title, plt)
 
 
 def make_encoding_names(label, num_encodings):
@@ -620,8 +623,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                                         plt.legend(handles, labels, bbox_to_anchor=(1.04, 1), loc="upper left")
                                     else:
                                         plt.legend(store_ids, bbox_to_anchor=(1.04, 1), loc="upper left")
-                                savefig(title + ('-Bars' if plot_bars else '-overTime'), plt)
-                                plt.show()
+                                save_show_close(title + ('-Bars' if plot_bars else '-overTime'), plt)
 
             return  # One batch of datapoints is enough
 
@@ -766,8 +768,7 @@ def classify_stores(name, log_a, log_b, log_temp):
 
     fig.tight_layout()
     plt.legend(range(1,num_stores+1), bbox_to_anchor=(1.04,1), loc="upper left")
-    savefig(name + '-ab', plt)
-    plt.show()
+    save_show_close(name + '-ab', plt)
 
     a_average = np.mean(a, axis=0)
     b_average = np.mean(b, axis=0)
@@ -786,8 +787,7 @@ def classify_stores(name, log_a, log_b, log_temp):
             ax.set_ylabel(label)
 
     plt.legend(range(1,num_stores+1), bbox_to_anchor=(1.04,1), loc="upper left")
-    savefig(name + '-annualTrend', plt)
-    plt.show()
+    save_show_close(name + '-annualTrend', plt)
 
     # a is b x t x s. What's the maximum importance for each store anywhere?
     max_importance = np.max(a, axis=(0,1))
@@ -820,8 +820,7 @@ def plot_nse_map(title, lats, lons, nse_err, states):
     ax = fig.add_subplot(1, 1, 1)
     plot_states(ax, states)
     colorplot_latlong(ax, nse_err, f'{title}\nRange {nse_err.min():.3f} to {nse_err.max():.3f}', lats, lons, True)
-    savefig(title, plt)
-    plt.show()
+    save_show_close(title, plt)
 
 
 def print_corr(correlations, signame, enc_names):
@@ -963,8 +962,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
     ax.grid(True)
     ax.set_title(f'Encoding sensitivity')
 
-    plt.show()
-
+    save_show_close('Encoding sensitivity', plt)
 
 
 def train_encoder_only(encoder, train_loader, validate_loader, dataset_properties: DatasetProperties,
@@ -1370,7 +1368,7 @@ def check_dataloaders(train_loader, validate_loader):
 def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
                           model_store_path, ablation_test, states, data_root):
-    coupled_learning_rate = 0.01 if ablation_test else 0.0003
+    coupled_learning_rate = 0.01 if ablation_test else 0.00015
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
@@ -1378,7 +1376,7 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
         os.mkdir(model_store_path)
     progress_file = model_store_path + '/progress.log'
     with open(progress_file, 'w') as f:
-        f.write('LR={coupled_learning_rate}\n')
+        f.write(f'LR={coupled_learning_rate}\n')
 
     # Low weight decay on output layers
     decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
