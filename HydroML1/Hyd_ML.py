@@ -16,7 +16,7 @@ import pickle
 from scipy import stats
 import matplotlib.ticker as mtick
 
-plotting_freq = 1
+plotting_freq = 0
 batch_size = 128
 perturbation = 0.1  # For method of Morris
 weight_decay = 0
