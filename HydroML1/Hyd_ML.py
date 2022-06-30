@@ -30,7 +30,7 @@ def savefig(name, plt):
 def save_show_close(name, plt):
     savefig(name, plt)
     plt.show()
-    plt.close()
+    plt.close('all')
 
 
 # Return NSE and huber(1-NSE), which is what we minimize
@@ -1051,7 +1051,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                     ax2.plot(moving_average(validation_loss_list), color='#00AA00')
                 ax2.set_ylim(0, 1)
 
-                fig.show()
+                save_show_close('ModelRun', plt)
 
         # Test the model
         encoder.eval()
@@ -1098,7 +1098,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
         ax_boxwhisker.set_xlim(0, 3)
         errorfig.tight_layout()
         ax_boxwhisker.set_title("Relative error distribution")
-        errorfig.show()
+        save_show_close('RelErrorDistn', plt)
 
 
 
@@ -1277,7 +1277,7 @@ def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNe
 
             ax_loss.plot(loss_list, color='b')
 
-            fig.show()
+            save_show_close('FakeData2', plt)
     return decoder
 
 
@@ -1329,7 +1329,7 @@ def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_
 
             ax_loss.plot(loss_list, color='b')
 
-            fig.show()
+            save_show_close('FakeData', plt)
     return decoder
 
 #inflow_inputs = input_size-store_size
@@ -1494,7 +1494,7 @@ def plot_sig_nse(dataset_properties, local_loss_list, sigs, temp_sig_list):
         ax_scatter.set_title(f"{sig} vs NSE")
         i += 1
 
-    fig.show()
+    save_show_close('SigNSE', plt)
 
 class EpochRunner:
     def __init__(self):
@@ -1667,7 +1667,7 @@ def plot_training(train, datapoints, dataset_properties, decoder, flow, idx, los
     for tidx in [0, 1]:
         ax_temp.plot(temp[tidx, :], color=cols[tidx], label="Temperature (C)")  # Batch 0
     ax_aet.set_title("AET and temperature")
-    fig.show()
+    save_show_close('ModelRes', plt)
 
 
 def plot_model_flow_performance(ax_input, flow, datapoints: DataPoint, outputs, dataset_properties: DatasetProperties,
@@ -1770,8 +1770,8 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
                 l_model, = ax_input.plot(attrib[batch_idx, :], color='r', label='Model')  # Batch 0
 
             ax_input.legend([l_model], [label], loc="upper right")
-            time.sleep(1)
-            fig.show()
+            #time.sleep(1)
+            save_show_close('Preview', plt)
 
         for idx, label in enumerate(sig_labels):
             fig = plt.figure()
@@ -1783,8 +1783,8 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
                 l_model, = ax_input.plot([sigs[batch_idx], sigs[batch_idx]], color='r', label='Model')  # Batch 0
 
             ax_input.legend([l_model], [label], loc="upper right")
-            fig.show()
-            time.sleep(1)
+            save_show_close('Preview2', plt)
+            #time.sleep(1)
 
         break
 
@@ -1940,8 +1940,7 @@ def do_ablation_test():
         ax_hist_av.set_title(f"Median Abl. validation NSE {i}")
 
         print(f"Median init NSE={np.median(init_nse_vec)} final NSE={np.median(final_nse_vec)}")
-
-        fig.show()
+        save_show_close('AblationTest', plt)
 
 
 # Generate plots from each of a list of models, and compare models.
@@ -1995,8 +1994,7 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
     ax_boxwhisker.set_xlim(-1, 1)
     ax_boxwhisker.set_xlabel("NSE")
     fig.tight_layout()
-    savefig('Comparison-boxplot', plt)
-    fig.show()
+    save_show_close('Comparison-boxplot', plt)
 
 
 #Test whether/how well this encoder structure can learn existing CAMELS signatures.
