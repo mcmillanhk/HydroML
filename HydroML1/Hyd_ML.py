@@ -1801,13 +1801,14 @@ def train_test_everything(subsample_data, seed, camels_path,
                           model_load_path,
                           model_store_path,
                           data_root,
-                          encoder_properties=EncoderProperties(), decoder_properties=DecoderProperties()
+                          encoder_properties=EncoderProperties(), decoder_properties=DecoderProperties(),
+                          years_per_sample=1
                           ):
     torch.manual_seed(seed)
 
     train_loader, validate_loader, test_loader, dataset_properties \
         = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
-                      load_test=False, encoder_years=1, decoder_years=1)
+                      load_test=False, encoder_years=years_per_sample, decoder_years=years_per_sample)
 
     states = load_states(data_root)
 

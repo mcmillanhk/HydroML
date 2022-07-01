@@ -1,7 +1,7 @@
 # Script for hyperparameter training on cluster
 import argparse
 
-from Hyd_ML import train_test_everything
+from Hyd_ML import train_test_everything, plotting_freq, batch_size
 import sys
 
 from Util import *
@@ -14,8 +14,19 @@ if __name__ == '__main__':
                         help='')
     parser.add_argument('--reload', type=int, default=0, nargs='?',
                         help='Whether to reload the last model from the same directory (E200)')
+    parser.add_argument('--log_batch_size', type=int, nargs='?', default=None,
+                        help='Whether to model flow_between_stores')
+    parser.add_argument('--years_per_sample', type=int, nargs='?', default=1,
+                        help='Whether to model flow_between_stores')
 
     args = parser.parse_args()
+
+    global plotting_freq
+    plotting_freq = 0
+
+    global batch_size
+    if args.log_batch_size is not None:
+        batch_size = int(2 ** args.log_batch_size)
 
     encoder_properties = EncoderProperties()
     decoder_properties = DecoderProperties()
@@ -24,4 +35,5 @@ if __name__ == '__main__':
 
     train_test_everything(1, 1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
                           'models/Epoch200' if args.reload else None, 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data",
-                          encoder_properties=encoder_properties, decoder_properties=decoder_properties)
+                          encoder_properties=encoder_properties, decoder_properties=decoder_properties,
+                          years_per_sample=args.years_per_sample)
