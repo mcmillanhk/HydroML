@@ -8,16 +8,14 @@ from Util import *
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train with a set of hyperparameters')
-    parser.add_argument('--flow_between_stores', type=bool, nargs='?', default=False,
+    parser.add_argument('--flow_between_stores', type=bool, nargs='?', default=True,
                         help='Whether to model flow_between_stores')
-    parser.add_argument('--num_stores', type=int, default=8, nargs='?',
+    parser.add_argument('--num_stores', type=int, default=24, nargs='?',
                         help='')
     parser.add_argument('--reload', type=int, default=0, nargs='?',
                         help='Whether to reload the last model from the same directory (E200)')
-    parser.add_argument('--log_batch_size', type=int, nargs='?', default=None,
-                        help='Whether to model flow_between_stores')
-    parser.add_argument('--years_per_sample', type=int, nargs='?', default=1,
-                        help='Whether to model flow_between_stores')
+    parser.add_argument('--log_batch_size', type=int, nargs='?', default=None)
+    parser.add_argument('--years_per_sample', type=int, nargs='?', default=1)
 
     args = parser.parse_args()
 
