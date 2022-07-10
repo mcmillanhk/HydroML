@@ -1,7 +1,7 @@
 # Script for hyperparameter training on cluster
 import argparse
 
-from Hyd_ML import train_test_everything, plotting_freq, batch_size
+from Hyd_ML import train_test_everything, plotting_freq, batch_size, interstore_weight_eps, weight_decay
 import sys
 
 from Util import *
@@ -16,6 +16,8 @@ if __name__ == '__main__':
                         help='Whether to reload the last model from the same directory (E200)')
     parser.add_argument('--log_batch_size', type=int, nargs='?', default=None)
     parser.add_argument('--years_per_sample', type=int, nargs='?', default=1)
+    parser.add_argument('--interstore_weight_eps', type=int, nargs='?', default=4)
+    parser.add_argument('--weight_decay', type=int, nargs='?', default=1)
 
     args = parser.parse_args()
 
@@ -25,6 +27,12 @@ if __name__ == '__main__':
     global batch_size
     if args.log_batch_size is not None:
         batch_size = int(2 ** args.log_batch_size)
+
+    global interstore_weight_eps
+    interstore_weight_eps = 0.005 * (args.interstore_weight_eps-1)
+
+    global weight_decay
+    weight_decay = 0.005 * (args.weight_decay-1)
 
     encoder_properties = EncoderProperties()
     decoder_properties = DecoderProperties()

@@ -20,6 +20,7 @@ plotting_freq = 0
 batch_size = 512
 perturbation = 0.1  # For method of Morris
 weight_decay = 0
+interstore_weight_eps = 0.02
 
 def savefig(name, plt):
     fig_output = r"figures"
@@ -1566,14 +1567,14 @@ class EpochRunner:
 
             hl = torch.nn.HuberLoss(delta=5)
             store_loss = hl(store_error, torch.zeros(store_error.shape).double())
-            weight = 0.02 * huber_loss.detach() / (huber_loss.detach() + store_loss.detach())
+            weight = 0.02 * huber_loss.detach() / max(store_loss.detach(), 1e-6)
             #print(f"{weight=}")
             huber_loss += store_loss * weight
 
             if interstore is not None:
                 hl = torch.nn.HuberLoss(delta=0.01)
                 interstore_loss = hl(interstore, torch.zeros(interstore.shape).double())
-                weight = 0.02 * huber_loss.detach() / max(interstore_loss.detach(), 1e-6)
+                weight = interstore_weight_eps * huber_loss.detach() / max(interstore_loss.detach(), 1e-6)
                 # print(f"{weight=}")
                 huber_loss += interstore_loss * weight
 
