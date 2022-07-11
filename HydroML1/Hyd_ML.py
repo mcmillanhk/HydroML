@@ -1,8 +1,10 @@
 # Implements all the main training and testing algorithms
 # Also implements the encoder (TODO move to own file)
-
+import io
 import shutil
 import scipy as sp
+from matplotlib.backends.backend_svg import FigureCanvasSVG
+
 import CAMELS_data as Cd
 import os
 import matplotlib.pyplot as plt
@@ -17,19 +19,20 @@ from scipy import stats
 import matplotlib.ticker as mtick
 
 plotting_freq = 0
-batch_size = 512
 perturbation = 0.1  # For method of Morris
-weight_decay = 0
-interstore_weight_eps = 0.02
 
-def savefig(name, plt):
+def savefig(name, plt, fig):
     fig_output = r"figures"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
-    plt.savefig(fig_output + r'/' + name + '.svg')
+    plt.savefig(fig_output + r'/' + name + '.svg', format='svgz')
+    #output = io.BytesIO()
+    #FigureCanvasSVG(plt.figure()).print_svgz(output)
+    #with open(fig_output + r'/' + name + '.svg', "wb") as f:
+    #    f.write(output.getbuffer())
 
-def save_show_close(name, plt):
-    savefig(name, plt)
+def save_show_close(name, plt, fig):
+    savefig(name, plt, fig)
     plt.show()
     plt.close('all')
 
@@ -352,7 +355,7 @@ def test_encoder(data_loaders: List[DataLoader], encoder: nn.Module, encoder_pro
             encodingvec = encodings[:, i]
             colorplot_latlong(ax, encodingvec, f'{label} {i+1}', lats, lons, False, 5)
 
-        save_show_close(label, plt)
+        save_show_close(label, plt, fig)
 
         rank = False
         M = stats.spearmanr(encodings).correlation if rank else np.corrcoef(encodings, rowvar=False)
@@ -456,7 +459,7 @@ def print_plot_correlations(label, sig_name, dataset_properties, encodings, sigs
 
     ax.set_title(title)
     fig.tight_layout()
-    save_show_close(title, plt)
+    save_show_close(title, plt, fig)
 
 
 def make_encoding_names(label, num_encodings):
@@ -624,7 +627,7 @@ def test_encoding_effect(results, data_loaders: List[DataLoader], models: List[O
                                         plt.legend(handles, labels, bbox_to_anchor=(1.04, 1), loc="upper left")
                                     else:
                                         plt.legend(store_ids, bbox_to_anchor=(1.04, 1), loc="upper left")
-                                save_show_close(title + ('-Bars' if plot_bars else '-overTime'), plt)
+                                save_show_close(title + ('-Bars' if plot_bars else '-overTime'), plt, fig)
 
             return  # One batch of datapoints is enough
 
@@ -769,7 +772,7 @@ def classify_stores(name, log_a, log_b, log_temp):
 
     fig.tight_layout()
     plt.legend(range(1,num_stores+1), bbox_to_anchor=(1.04,1), loc="upper left")
-    save_show_close(name + '-ab', plt)
+    save_show_close(name + '-ab', plt, fig)
 
     a_average = np.mean(a, axis=0)
     b_average = np.mean(b, axis=0)
@@ -788,7 +791,7 @@ def classify_stores(name, log_a, log_b, log_temp):
             ax.set_ylabel(label)
 
     plt.legend(range(1,num_stores+1), bbox_to_anchor=(1.04,1), loc="upper left")
-    save_show_close(name + '-annualTrend', plt)
+    save_show_close(name + '-annualTrend', plt, fig)
 
     # a is b x t x s. What's the maximum importance for each store anywhere?
     max_importance = np.max(a, axis=(0,1))
@@ -821,7 +824,7 @@ def plot_nse_map(title, lats, lons, nse_err, states):
     ax = fig.add_subplot(1, 1, 1)
     plot_states(ax, states)
     colorplot_latlong(ax, nse_err, f'{title}\nRange {nse_err.min():.3f} to {nse_err.max():.3f}', lats, lons, True)
-    save_show_close(title, plt)
+    save_show_close(title, plt, fig)
 
 
 def print_corr(correlations, signame, enc_names):
@@ -963,7 +966,7 @@ def encoding_sensitivity(encoder: nn.Module, encoder_properties: EncoderProperti
     ax.grid(True)
     ax.set_title(f'Encoding sensitivity')
 
-    save_show_close('Encoding sensitivity', plt)
+    save_show_close('Encoding sensitivity', plt, fig)
 
 
 def train_encoder_only(encoder, train_loader, validate_loader, dataset_properties: DatasetProperties,
@@ -1052,7 +1055,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                     ax2.plot(moving_average(validation_loss_list), color='#00AA00')
                 ax2.set_ylim(0, 1)
 
-                save_show_close('ModelRun', plt)
+                save_show_close('ModelRun', plt, fig)
 
         # Test the model
         encoder.eval()
@@ -1099,7 +1102,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
         ax_boxwhisker.set_xlim(0, 3)
         errorfig.tight_layout()
         ax_boxwhisker.set_title("Relative error distribution")
-        save_show_close('RelErrorDistn', plt)
+        save_show_close('RelErrorDistn', plt, fig)
 
 
 
@@ -1123,7 +1126,7 @@ def validate(dataloader, encoder, decoder):
 
 
 def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_properties: DatasetProperties,
-                          decoder_properties: DecoderProperties): #, encoder_layers, encoding_dim, hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim, hyd_data_labels):
+                          decoder_properties: DecoderProperties, batch_size: int): #, encoder_layers, encoding_dim, hidden_dim, batch_size, num_sigs, decoder_model_type, store_dim, hyd_data_labels):
 
     if encoder_properties.encoder_type == EncType.CNNEncoder:
         encoder = Encoder(dataset_properties, encoder_properties,).double()
@@ -1132,19 +1135,6 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
                            batch_size=batch_size).double()
     else:
         encoder = None
-        #raise Exception("Unhandled network structure")
-
-
-    #    encoder_properties.encoding_dim() + len(dataset_properties.attrib_normalizers) \
-    #                    + len(dataset_properties.climate_norm)
-
-    #decoder_hidden_dim = 100
-    #output_dim = 1
-    #output_layers = 2
-
-    #if encoding_dim > 0:
-    #    encoder.load_state_dict(torch.load(pretrained_encoder_path))
-    #    encoder.output_encoding = True
 
     decoder = None
     if decoder_properties.decoder_model_type == DecoderType.LSTM:
@@ -1157,7 +1147,6 @@ def setup_encoder_decoder(encoder_properties: EncoderProperties, dataset_propert
     return encoder, decoder
 
 
-#input_size, store_size, batch_size, index_temp_minmax, weight_temp):
 def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNet, train_loader, dataset_properties: DatasetProperties, decoder_properties: DecoderProperties, encoding_dim: int):
     coupled_learning_rate = 0.0003
 
@@ -1278,7 +1267,7 @@ def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNe
 
             ax_loss.plot(loss_list, color='b')
 
-            save_show_close('FakeData2', plt)
+            save_show_close('FakeData2', plt, fig)
     return decoder
 
 
@@ -1330,7 +1319,7 @@ def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_
 
             ax_loss.plot(loss_list, color='b')
 
-            save_show_close('FakeData', plt)
+            save_show_close('FakeData', plt, fig)
     return decoder
 
 #inflow_inputs = input_size-store_size
@@ -1365,11 +1354,13 @@ def check_dataloaders(train_loader, validate_loader):
             if this_gauge_id != gauge_id:
                 raise Exception(f"{this_gauge_id} != {gauge_id}")
 
+
 # Expect encoder is pretrained, decoder might be
 def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder, decoder, encoder_properties: EncoderProperties,
                           decoder_properties: DecoderProperties, dataset_properties: DatasetProperties,
+                          training_properties: TrainingProperties,
                           model_store_path, ablation_test, states, data_root):
-    coupled_learning_rate = 0.01 if ablation_test else 0.0003
+    coupled_learning_rate = 0.01 if ablation_test else training_properties.learning_rate
 
     criterion = nse_loss  # nn.SmoothL1Loss()  #  nn.MSELoss()
 
@@ -1380,18 +1371,19 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
         f.write(f'LR={coupled_learning_rate}\n')
 
     # Low weight decay on output layers
-    decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
-              {'params': decoder.inflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
-              {'params': decoder.outflow_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
-              {'params': decoder.et_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
-              {'params': decoder.init_store_layer.parameters(), 'weight_decay': weight_decay, 'lr': coupled_learning_rate},
+    decoder_params = [{'params': decoder.flownet.parameters(), 'weight_decay': training_properties.weight_decay, 'lr': coupled_learning_rate},
+              {'params': decoder.inflow_layer.parameters(), 'weight_decay': training_properties.weight_decay, 'lr': coupled_learning_rate},
+              {'params': decoder.outflow_layer.parameters(), 'weight_decay': training_properties.weight_decay, 'lr': coupled_learning_rate},
+              {'params': decoder.et_layer.parameters(), 'weight_decay': training_properties.weight_decay, 'lr': coupled_learning_rate},
+              {'params': decoder.init_store_layer.parameters(), 'weight_decay': training_properties.weight_decay, 'lr': coupled_learning_rate},
               ]
     encoder_params = []
     if encoder_properties.encoder_type != EncType.NoEncoder:
-        encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': weight_decay,
+        encoder_params += [{'params': list(encoder.parameters()), 'weight_decay': training_properties.weight_decay,
                             'lr': coupled_learning_rate/1}]
 
-    opt_full = torch.optim.Adam(encoder_params + decoder_params, lr=coupled_learning_rate, weight_decay=weight_decay)
+    opt_full = torch.optim.Adam(encoder_params + decoder_params, lr=coupled_learning_rate,
+                                weight_decay=training_properties.weight_decay)
     optimizer = opt_full
 
     #Should be random initialization
@@ -1410,7 +1402,7 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
         validate_plot_idx = plot_indices(plotting_freq, len(validate_loader.dec))
 
     decoder.weight_stores = 0.001
-    er = EpochRunner()
+    er = EpochRunner(training_properties)
 
     init_val_nse = []
     if output_epochs > 1:
@@ -1495,12 +1487,13 @@ def plot_sig_nse(dataset_properties, local_loss_list, sigs, temp_sig_list):
         ax_scatter.set_title(f"{sig} vs NSE")
         i += 1
 
-    save_show_close('SigNSE', plt)
+    save_show_close('SigNSE', plt, fig)
 
 class EpochRunner:
-    def __init__(self):
+    def __init__(self, training_properties: TrainingProperties):
         self.vals = {}
         self.grads = {}
+        self.training_properties = training_properties
 
     def examine(self, name, param):
         self.examine_val(name + '-val', param.detach().flatten())
@@ -1544,8 +1537,6 @@ class EpochRunner:
         sigs = ["runoff_ratio", "q_mean"]
         temp_sig_list = {sig: [] for sig in sigs}
 
-        weight = 0.01
-
         for idx, datapoints in enumerate(data_loader.dec):
             if train:
                 encoder.train()
@@ -1567,14 +1558,14 @@ class EpochRunner:
 
             hl = torch.nn.HuberLoss(delta=5)
             store_loss = hl(store_error, torch.zeros(store_error.shape).double())
-            weight = 0.02 * huber_loss.detach() / max(store_loss.detach(), 1e-6)
+            weight = self.training_properties.water_balance_weight_eps * huber_loss.detach() / max(store_loss.detach(), 1e-6)
             #print(f"{weight=}")
             huber_loss += store_loss * weight
 
             if interstore is not None:
                 hl = torch.nn.HuberLoss(delta=0.01)
                 interstore_loss = hl(interstore, torch.zeros(interstore.shape).double())
-                weight = interstore_weight_eps * huber_loss.detach() / max(interstore_loss.detach(), 1e-6)
+                weight = self.training_properties.interstore_weight_eps * huber_loss.detach() / max(interstore_loss.detach(), 1e-6)
                 # print(f"{weight=}")
                 huber_loss += interstore_loss * weight
 
@@ -1668,7 +1659,7 @@ def plot_training(train, datapoints, dataset_properties, decoder, flow, idx, los
     for tidx in [0, 1]:
         ax_temp.plot(temp[tidx, :], color=cols[tidx], label="Temperature (C)")  # Batch 0
     ax_aet.set_title("AET and temperature")
-    save_show_close('ModelRes', plt)
+    save_show_close('ModelRes', plt, fig)
 
 
 def plot_model_flow_performance(ax_input, flow, datapoints: DataPoint, outputs, dataset_properties: DatasetProperties,
@@ -1772,7 +1763,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 
             ax_input.legend([l_model], [label], loc="upper right")
             #time.sleep(1)
-            save_show_close('Preview', plt)
+            save_show_close('Preview', plt, fig)
 
         for idx, label in enumerate(sig_labels):
             fig = plt.figure()
@@ -1784,7 +1775,7 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
                 l_model, = ax_input.plot([sigs[batch_idx], sigs[batch_idx]], color='r', label='Model')  # Batch 0
 
             ax_input.legend([l_model], [label], loc="upper right")
-            save_show_close('Preview2', plt)
+            save_show_close('Preview2', plt, fig)
             #time.sleep(1)
 
         break
@@ -1796,19 +1787,19 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 # \camels_path: path to Camels-US dataset (and unzip CAMELS ATTRIBUTES inside this)
 # \data_root: Path to directory from git containing train/test/validate split plus US states outline
 # Set encoder and decoder hyperparameters in Util.py
-# A few other parameters are hardcoded in this file: batch size at top, # years' data per datapoint below (separate for
-# encoder and decoder)
 def train_test_everything(subsample_data, seed, camels_path,
                           model_load_path,
                           model_store_path,
                           data_root,
                           encoder_properties=EncoderProperties(), decoder_properties=DecoderProperties(),
+                          training_properties=TrainingProperties(),
                           years_per_sample=1
                           ):
     torch.manual_seed(seed)
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
+        = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=training_properties.batch_size,
+                      load_train=True, load_validate=True,
                       load_test=False, encoder_years=years_per_sample, decoder_years=years_per_sample)
 
     states = load_states(data_root)
@@ -1824,16 +1815,17 @@ def train_test_everything(subsample_data, seed, camels_path,
 
     decoder, decoder_properties, encoder, encoder_properties = load_network(load_decoder, load_encoder,
                                                                             dataset_properties,
-                                                                            model_load_path, batch_size,
+                                                                            model_load_path, training_properties.batch_size,
                                                                             encoder_properties, decoder_properties)
 
     train_encoder_decoder(1200, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
-            dataset_properties, model_store_path, (subsample_data <= 0), states, data_root)
+            dataset_properties, training_properties, model_store_path, (subsample_data <= 0), states, data_root)
 
 
 def reduce_encoding(subsample_data, model_load_path, model_io_path):
+    training_properties = TrainingProperties()
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True,
+        = load_inputs(subsample_data=subsample_data, batch_size=training_properties.batch_size, load_train=True, load_validate=True,
                       load_test=False, encoder_years=1, decoder_years=1)
 
     model_store_path = model_io_path + '/out/'
@@ -1843,7 +1835,7 @@ def reduce_encoding(subsample_data, model_load_path, model_io_path):
 
     decoder, decoder_properties, encoder, encoder_properties = load_network(True, True,
                                                                             dataset_properties,
-                                                                            model_load_path, batch_size)
+                                                                            model_load_path, training_properties.batch_size)
 
     encoder_properties.dropout_indices = []
 
@@ -1866,7 +1858,7 @@ def reduce_encoding(subsample_data, model_load_path, model_io_path):
 
             encoder_properties.dropout_indices.append(test_idx)
             _, val_nse_err_list = train_encoder_decoder(1, train_loader, validate_loader, encoder, decoder, encoder_properties,
-                                            decoder_properties, dataset_properties, temp_store_path, False)
+                                            decoder_properties, dataset_properties, training_properties, temp_store_path, False)
             encoder_properties.dropout_indices.pop()
 
             nse_err = np.median(val_nse_err_list)
@@ -1905,7 +1897,7 @@ def load_network(load_decoder, load_encoder, dataset_properties, model_load_path
             if not hasattr(decoder_properties.hyd_model_net_props, 'weight_stores'):
                 decoder_properties.hyd_model_net_props.weight_stores = 0.001
 
-    encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties)
+    encoder, decoder = setup_encoder_decoder(encoder_properties, dataset_properties, decoder_properties, batch_size)
     if load_encoder:
         encoder.load_state_dict(torch.load(encoder_load_path))
         encoder.hydro_met_encoder.av_layer = None  # recreate this on-the-fly to match the amount of input
@@ -1942,7 +1934,7 @@ def do_ablation_test():
         ax_hist_av.set_title(f"Median Abl. validation NSE {i}")
 
         print(f"Median init NSE={np.median(init_nse_vec)} final NSE={np.median(final_nse_vec)}")
-        save_show_close('AblationTest', plt)
+        save_show_close('AblationTest', plt, fig)
 
 
 # Generate plots from each of a list of models, and compare models.
@@ -1951,8 +1943,9 @@ def do_ablation_test():
 # \subsample_data: 1 to load every datapoint; 2 to load every 2nd datapoint etc. For fast testing.
 # \model_load_paths: List of (model_load_path, "Model name") tuples.
 def compare_models(camels_path, data_root, subsample_data, model_load_paths):
+    training_properties = TrainingProperties()
     dataset_train, dataset_val, dataset_test, dataset_properties \
-        = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
+        = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=training_properties.batch_size, load_train=True, load_validate=True, load_test=False,
                       encoder_years=1, decoder_years=1)
 
     all_datasets = [dataset_train, dataset_val, dataset_test]
@@ -1969,12 +1962,12 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
         model = Object()
         model.name = model_name
         model.decoder, model.decoder_properties, model.encoder, model.encoder_properties =\
-            load_network(True, True, dataset_properties, model_load_path, batch_size)
+            load_network(True, True, dataset_properties, model_load_path, training_properties.batch_size)
         models.append(model)
 
     test_encoder_decoder_nse(datasets, models, dataset_properties, states)
 
-    er = EpochRunner()
+    er = EpochRunner(training_properties)
 
     for model in models:
         enc_inputs = all_encoder_inputs(test, model.encoder_properties, dataset_properties)
@@ -1996,11 +1989,12 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
     ax_boxwhisker.set_xlim(-1, 1)
     ax_boxwhisker.set_xlabel("NSE")
     fig.tight_layout()
-    save_show_close('Comparison-boxplot', plt)
+    save_show_close('Comparison-boxplot', plt, fig)
 
 
 #Test whether/how well this encoder structure can learn existing CAMELS signatures.
 def can_encoder_learn_sigs(subsample_data):
+    batch_size = TrainingProperties().batch_size
     dataset_train, dataset_validate, _, dataset_properties \
         = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
                       encoder_years=5)

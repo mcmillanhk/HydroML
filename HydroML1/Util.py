@@ -8,6 +8,13 @@ from DataPoint import *
 import numpy as np
 import torch
 
+class TrainingProperties:
+    batch_size = 512
+    weight_decay = 0
+    water_balance_weight_eps = 0.02
+    interstore_weight_eps = 0.02
+    learning_rate = 0.0003
+    #Should years per sample go here? Subsample_data?
 
 class EncType(Enum):
     NoEncoder = 0

@@ -16,7 +16,7 @@ if __name__ == '__main__':
                         help='Whether to reload the last model from the same directory (E200)')
     parser.add_argument('--log_batch_size', type=int, nargs='?', default=None)
     parser.add_argument('--years_per_sample', type=int, nargs='?', default=1)
-    parser.add_argument('--interstore_weight_eps', type=int, nargs='?', default=4)
+    parser.add_argument('--interstore_weight_eps', type=int, nargs='?', default=None)
     parser.add_argument('--weight_decay', type=int, nargs='?', default=1)
 
     args = parser.parse_args()
@@ -24,15 +24,15 @@ if __name__ == '__main__':
     global plotting_freq
     plotting_freq = 0
 
-    global batch_size
+    training_properties = TrainingProperties()
     if args.log_batch_size is not None:
-        batch_size = int(2 ** args.log_batch_size)
+        training_properties.batch_size = int(2 ** args.log_batch_size)
 
-    global interstore_weight_eps
-    interstore_weight_eps = 0.005 * (args.interstore_weight_eps-1)
+    if args.interstore_weight_eps is not None:
+        training_properties.interstore_weight_eps = 0.005 * (args.interstore_weight_eps-1)
 
-    global weight_decay
-    weight_decay = 0.005 * (args.weight_decay-1)
+    if args.weight_decay is not None:
+        training_properties.weight_decay = 0.005 * (args.weight_decay-1)
 
     encoder_properties = EncoderProperties()
     decoder_properties = DecoderProperties()
@@ -41,5 +41,5 @@ if __name__ == '__main__':
 
     train_test_everything(1, 1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
                           'models/Epoch200' if args.reload else None, 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data",
-                          encoder_properties=encoder_properties, decoder_properties=decoder_properties,
+                          encoder_properties=encoder_properties, decoder_properties=decoder_properties, training_properties=training_properties,
                           years_per_sample=args.years_per_sample)
