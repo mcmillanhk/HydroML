@@ -38,13 +38,13 @@ def save_show_close(name, plt, fig):
 
 
 # Return NSE and huber(1-NSE), which is what we minimize
-def nse_loss(output, target):  # both inputs t x b
+def nse_loss(output, target, training_properties: TrainingProperties):  # both inputs t x b
     num = torch.sum((output - target)**2, dim=[0])
     denom = torch.sum((target - torch.mean(target, dim=[0]).unsqueeze(0))**2, dim=[0])
     loss = num/denom.clamp(min=1)
 
     # Huber-damped loss
-    hl = torch.nn.HuberLoss(delta=0.25)
+    hl = torch.nn.HuberLoss(delta=training_properties.huber_thresh)
     huber_loss = hl(torch.sqrt(loss), torch.zeros(loss.shape, dtype=torch.double))  # Probably simpler to just expand the Huber expression?
 
     return numpy_nse(loss.detach().numpy()), huber_loss
@@ -679,7 +679,7 @@ def test_encoder_decoder_nse(data_loaders: List[DataLoader], models: List[Object
                 outputs, _, _ = run_encoder_decoder(model.decoder, model.encoder, datapoints, model.encoder_properties,
                                               model.decoder_properties, dataset_properties, all_enc)
                 flow = datapoints.flow_data
-                loss, _ = compute_loss(nse_loss, flow, outputs)
+                loss, _ = compute_loss(nse_loss, TrainingProperties(), flow, outputs)
                 res.nse_err = cat(res.nse_err, loss)
                 res.lats, res.lons = cat_lat_lons(datapoints, res.lats, res.lons)
 
@@ -1002,7 +1002,7 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
             if torch.max(np.isnan(outputs.data)) == 1:
                 raise Exception('nan generated')
             signatures_ref = datapoints.signatures_tensor()  # np.squeeze(signatures)  # signatures is b x s x ?
-            loss = criterion(outputs, signatures_ref)
+            loss = criterion(outputs, signatures_ref, TrainingProperties())
             if torch.isnan(loss):
                 raise Exception('loss is nan')
 
@@ -1067,10 +1067,10 @@ def train_encoder_only(encoder, train_loader, validate_loader, dataset_propertie
                 hyd_data = encoder_properties.select_encoder_inputs(datapoints, dataset_properties)[0]  # New: t x i x b; Old: hyd_data[:, encoder_indices, :]
                 outputs = encoder(hyd_data)
                 signatures_ref = datapoints.signatures_tensor()
-                error = criterion(outputs, signatures_ref).item()
+                error = criterion(outputs, signatures_ref, TrainingProperties()).item()
                 validation_loss.append(error)
                 if show_bl:
-                    error_bl = criterion(0*outputs, signatures_ref).item()  # relative to predicting 0 for everything
+                    error_bl = criterion(0*outputs, signatures_ref, TrainingProperties()).item()  # relative to predicting 0 for everything
                     baseline_loss.append(error_bl)
 
                 rev = rel_error_vec(outputs, signatures_ref, dataset_properties)
@@ -1236,14 +1236,14 @@ def train_decoder_only_fakedata(encoder, encoder_properties, decoder: HydModelNe
                                                                                     # something. And also all the other flows out of the slow store
                 expected_b[batch_idx, outflow_idx_start + slow_store_idx2] = 0.001
 
-            loss = criterion(a, expected_a)
+            loss = criterion(a, expected_a, TrainingProperties())
             if decoder_properties.hyd_model_net_props.scale_b:
                 loss += criterion(b[:, outflow_idx_start + snow_store_idx], snowmelt /
-                                  decoder_properties.hyd_model_net_props.outflow_weights[0, outflow_idx_start + snow_store_idx])
+                                  decoder_properties.hyd_model_net_props.outflow_weights[0, outflow_idx_start + snow_store_idx], TrainingProperties())
             else:
-                loss += criterion(b, expected_b)
+                loss += criterion(b, expected_b, TrainingProperties())
 
-            loss += criterion(et, torch.from_numpy(expected_et_scaled[sample, :]))
+            loss += criterion(et, torch.from_numpy(expected_et_scaled[sample, :]), TrainingProperties())
 
             loss_list.append(loss.item())
 
@@ -1300,7 +1300,7 @@ def train_decoder_only_fakedata_outputs(decoder: HydModelNet, input_size, store_
             expected[batch_idx, slow_store_idx] = 0.001  # we really want this to be slow. Could start with -1 or something
             expected[batch_idx, slow_store_idx+1] = 0.001
 
-        loss = criterion(b, expected)
+        loss = criterion(b, expected, TrainingProperties())
         loss_list.append(loss.item())
 
         # Backprop and perform Adam optimisation
@@ -1387,7 +1387,7 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
     optimizer = opt_full
 
     #Should be random initialization
-    if not ablation_test and output_epochs > 1:
+    if not ablation_test and output_epochs > 1 and plotting_freq > 0:
         test_encoder([train_loader, validate_loader], encoder, encoder_properties, dataset_properties, states)
 
     randomize_encoding = False
@@ -1554,7 +1554,7 @@ class EpochRunner:
                                           dataset_properties, all_enc)
 
             gt_flow = datapoints.flow_data  # b x t    .squeeze(axis=2).permute(1,0)  # t x b
-            nse_err, huber_loss = compute_loss(criterion, gt_flow, output_model_flow)
+            nse_err, huber_loss = compute_loss(criterion, self.training_properties, gt_flow, output_model_flow)
 
             hl = torch.nn.HuberLoss(delta=5)
             store_loss = hl(store_error, torch.zeros(store_error.shape).double())
@@ -1674,7 +1674,7 @@ def plot_model_flow_performance(ax_input, flow, datapoints: DataPoint, outputs, 
     ax_input.legend([l_model, l_gtflow, l_rain], ["Model", "GTFlow", "-Rain"], loc="upper right")
 
 
-def compute_loss(criterion, flow, outputs):
+def compute_loss(criterion, training_properties: TrainingProperties, flow, outputs):
     steps = flow.shape[1]  # t x 1 x b
     if steps <= 20:
         print("ERROR steps={steps}, likely mismatch with batch size.")
@@ -1684,7 +1684,7 @@ def compute_loss(criterion, flow, outputs):
         outputs = outputs.unsqueeze(1)
 
     output_flow_after_start = outputs[spinup:, :]
-    loss, huber_loss = criterion(output_flow_after_start, gt_flow_after_start)
+    loss, huber_loss = criterion(output_flow_after_start, gt_flow_after_start, training_properties)
     if torch.isnan(huber_loss):
         raise Exception('huber_loss is nan')
     # Track the accuracy

@@ -11,7 +11,7 @@ from Util import *
 def plot_one(sd):
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
-    ax.set_title(sd)
+    ax.set_title(sd.name)
     ax.set_ylabel("train/val loss")
     ax.set_xlabel("epoch")
 
@@ -45,7 +45,7 @@ def plot_one(sd):
 
     fig = plt.figure()
     ax2 = fig.add_subplot(1, 1, 1)
-    ax2.set_title("Final validation error: " + sd)
+    ax2.set_title("Final validation error: " + sd.name)
     ax2.set_ylabel("val loss")
     ax2.set_xlabel("run")
     ax2.plot(vals)
@@ -57,8 +57,8 @@ if __name__ == '__main__':
     path = sys.argv[1]
 
     if os.path.exists(path + "/output1"):
-        plot_one(path)
+        plot_one(os.path(path))
     else:
         superdirs = [d for d in os.scandir(path) if d.is_dir()]
         for sd in superdirs:
-            plot_one(sd.name)
+            plot_one(sd)

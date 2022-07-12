@@ -14,6 +14,7 @@ class TrainingProperties:
     water_balance_weight_eps = 0.02
     interstore_weight_eps = 0.02
     learning_rate = 0.0003
+    huber_thresh = 0.25
     #Should years per sample go here? Subsample_data?
 
 class EncType(Enum):

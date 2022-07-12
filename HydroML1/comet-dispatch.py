@@ -17,7 +17,9 @@ if __name__ == '__main__':
     parser.add_argument('--log_batch_size', type=int, nargs='?', default=None)
     parser.add_argument('--years_per_sample', type=int, nargs='?', default=1)
     parser.add_argument('--interstore_weight_eps', type=int, nargs='?', default=None)
-    parser.add_argument('--weight_decay', type=int, nargs='?', default=1)
+    parser.add_argument('--weight_decay', type=int, nargs='?', default=None)
+    parser.add_argument('--lr', type=int, nargs='?', default=None)
+    parser.add_argument('--huber_thresh', type=int, nargs='?', default=None)
 
     args = parser.parse_args()
 
@@ -33,6 +35,12 @@ if __name__ == '__main__':
 
     if args.weight_decay is not None:
         training_properties.weight_decay = 0.005 * (args.weight_decay-1)
+
+    if args.lr is not None:
+        training_properties.learning_rate = 0.0001 * args.lr
+
+    if args.huber_thresh is not None:
+        training_properties.huber_thresh = 0.005 * (args.huber_thresh-1)
 
     encoder_properties = EncoderProperties()
     decoder_properties = DecoderProperties()
