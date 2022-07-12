@@ -40,7 +40,7 @@ if __name__ == '__main__':
         training_properties.learning_rate = 0.0001 * args.lr
 
     if args.huber_thresh is not None:
-        training_properties.huber_thresh = 0.05 * (args.huber_thresh-1)
+        training_properties.huber_thresh = 0.05 * args.huber_thresh
 
     encoder_properties = EncoderProperties()
     decoder_properties = DecoderProperties()
