@@ -1,7 +1,7 @@
 # Script for hyperparameter training on cluster
 import argparse
 
-from Hyd_ML import train_test_everything, plotting_freq, batch_size, interstore_weight_eps, weight_decay
+from Hyd_ML import train_test_everything, plotting_freq
 import sys
 
 from Util import *
