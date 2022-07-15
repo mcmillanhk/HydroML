@@ -12,9 +12,9 @@ class TrainingProperties:
     batch_size = 512
     weight_decay = 0
     water_balance_weight_eps = 0.02
-    interstore_weight_eps = 0.02
+    interstore_weight_eps = 0.03
     learning_rate = 0.0003
-    huber_thresh = 0.25
+    huber_thresh = 0.4
     #Should years per sample go here? Subsample_data?
 
 class EncType(Enum):

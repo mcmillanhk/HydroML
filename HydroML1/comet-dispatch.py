@@ -1,5 +1,6 @@
 # Script for hyperparameter training on cluster
 import argparse
+import os.path
 
 from Hyd_ML import train_test_everything, plotting_freq
 import sys
@@ -47,7 +48,15 @@ if __name__ == '__main__':
     decoder_properties.hyd_model_net_props.flow_between_stores = args.flow_between_stores
     decoder_properties.hyd_model_net_props.store_dim = args.num_stores
 
+    path = None
+    if args.reload:  # Find the most trained model to reload
+        for i in range(20, 0, -1):
+            path = f"models/Epoch{i*100}"
+            if os.path.exists(path):
+                print("Reload from " + path)
+                break
+
     train_test_everything(1, 1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
-                          'models/Epoch200' if args.reload else None, 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data",
+                          path, 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data",
                           encoder_properties=encoder_properties, decoder_properties=decoder_properties, training_properties=training_properties,
                           years_per_sample=args.years_per_sample)
