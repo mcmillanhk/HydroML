@@ -56,36 +56,38 @@ def load_states(data_root):
 
 def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_train, load_validate, load_test, num_years):
     csv_file_train = os.path.join(data_root, 'train.txt')
-    csv_file_validate = os.path.join(data_root, 'validate.txt')
+    csv_file_validate = os.path.join(data_root, 'validate.txt') if subsample_data>0 else csv_file_train
     csv_file_test = os.path.join(data_root, 'test.txt')
 
     # Camels Dataset
     dataset_properties = DatasetProperties()
 
-    train_dataset = Cd.CamelsDataset(csv_file_train, camels_root, data_root, dataset_properties,
-                                     subsample_data=subsample_data, ablation_train=True, num_years=num_years) if load_train else None
+    train_loader = setup_dataloader(batch_size, camels_root, csv_file_train, data_root, dataset_properties, load_train,
+                                    num_years, subsample_data, True, True, False)
 
-    train_loader = None if train_dataset is None else DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-
-    test_dataset = Cd.CamelsDataset(csv_file_test, camels_root, data_root,
-                                    dataset_properties, subsample_data=subsample_data, num_years=num_years) if load_test else None
-
-    test_loader = None if test_dataset is None else DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False,
-                                                               collate_fn=collate_fn)
+    test_loader = setup_dataloader(batch_size, camels_root, csv_file_test, data_root, dataset_properties, load_test,
+                                   num_years, subsample_data, False, False, False)
 
     gauge_id = train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data <= 0 else None
-    validate_dataset = Cd.CamelsDataset(csv_file_validate if subsample_data>0 else csv_file_train, camels_root, data_root,
-                                        dataset_properties, subsample_data=subsample_data, ablation_validate=True,
-                                        gauge_id=gauge_id, num_years=num_years) if load_validate else None
-
-    # Data loader
-    validate_loader = None if validate_dataset is None else DataLoader(dataset=validate_dataset, batch_size=batch_size,
-                                 shuffle=True, collate_fn=collate_fn)  # Shuffle so we get less spiky validation plots
+    validate_loader = setup_dataloader(batch_size, camels_root, csv_file_validate, data_root, dataset_properties,
+                                       load_validate, num_years, subsample_data, True, False, True, gauge_id)
 
     if subsample_data <= 0:
         check_dataloaders(train_loader, validate_loader)
 
     return train_loader, validate_loader, test_loader, dataset_properties
+
+
+def setup_dataloader(batch_size, camels_root, csv_file_train, data_root, dataset_properties, load_train, num_years,
+                     subsample_data, shuffle, ablation_train, ablation_validate, gauge_id=None):
+    if not load_train:
+        return None
+
+    train_dataset = Cd.CamelsDataset(csv_file_train, camels_root, data_root, dataset_properties,
+                                     subsample_data=subsample_data, ablation_train=ablation_train,
+                                     ablation_validate=ablation_validate, num_years=num_years, gauge_id=gauge_id)
+    return DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn)
+
 
 
 def load_inputs(camels_path, data_root, batch_size, load_train, load_validate, load_test,
