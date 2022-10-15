@@ -47,6 +47,7 @@ if __name__ == '__main__':
     decoder_properties = DecoderProperties()
     decoder_properties.hyd_model_net_props.flow_between_stores = args.flow_between_stores
     decoder_properties.hyd_model_net_props.store_dim = args.num_stores
+    encoder_properties.hydro_encoding_output_dim = args.encoding_dim
 
     path = None
     if args.reload:  # Find the most trained model to reload

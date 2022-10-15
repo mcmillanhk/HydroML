@@ -13,8 +13,8 @@ class TrainingProperties:
     weight_decay = 0
     water_balance_weight_eps = 0.02
     interstore_weight_eps = 0.03
-    learning_rate = 0.0003
-    huber_thresh = 0.4
+    learning_rate = 0.0002
+    huber_thresh = 0.5
     #Should years per sample go here? Subsample_data?
 
 class EncType(Enum):
@@ -154,11 +154,8 @@ class EncoderProperties:
         return torch.nn.ReLU()
 
     def encoding_dim(self):
-        return 0 if self.encoder_type == EncType.NoEncoder else 16
-
-    #def select_one_encoder_inputs(self, datapoint: DataPoint):
-    #    datapoint.hydro_data: pd.DataFrame
-    #    return np.array(datapoint.hydro_data(self.encoder_names))
+        # Keep encoding dim the same as hydro_encoding_output_dim for now
+        return 0 if self.encoder_type == EncType.NoEncoder else self.hydro_encoding_output_dim
 
     def encoder_perm(self):
         if self.encoder_type == EncType.LSTMEncoder:
@@ -205,7 +202,7 @@ class DecoderProperties:
             self.hidden_dim = 256
             self.flownet_intermediate_output_dim = 32
             self.num_layers = 4
-            self.flow_between_stores = True  # Allow flow between stores; otherwise they're all connected only to out flow
+            self.flow_between_stores = False  # Allow flow between stores; otherwise they're all connected only to out flow
             self.decoder_include_stores = True
             self.decoder_include_signatures = False
             self.decoder_include_attributes = False

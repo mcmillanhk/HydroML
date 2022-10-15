@@ -16,7 +16,7 @@ def plot_one(sd):
     ax.set_xlabel("epoch")
 
     dirs = [d for d in os.scandir(sd) if d.is_dir()]
-    dirs.sort(key=lambda x: x.name)
+    dirs.sort(key=lambda x: int(parse('output{}', x.name)[0]))
     vals = []
     colors = plt.cm.jet(np.linspace(0, 1, len(dirs)))
     for dir, col in zip(dirs, colors):
