@@ -9,9 +9,11 @@ from Util import *
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train with a set of hyperparameters')
-    parser.add_argument('--flow_between_stores', type=bool, nargs='?', default=True,
+    parser.add_argument('--flow_between_stores', type=bool, nargs='?', default=None,
                         help='Whether to model flow_between_stores')
-    parser.add_argument('--num_stores', type=int, default=24, nargs='?',
+    parser.add_argument('--num_stores', type=int, default=None, nargs='?',
+                        help='')
+    parser.add_argument('--encoding_dim', type=int, default=None, nargs='?',
                         help='')
     parser.add_argument('--reload', type=int, default=0, nargs='?',
                         help='Whether to reload the last model from the same directory (E200)')
@@ -45,9 +47,12 @@ if __name__ == '__main__':
 
     encoder_properties = EncoderProperties()
     decoder_properties = DecoderProperties()
-    decoder_properties.hyd_model_net_props.flow_between_stores = args.flow_between_stores
-    decoder_properties.hyd_model_net_props.store_dim = args.num_stores
-    encoder_properties.hydro_encoding_output_dim = args.encoding_dim
+    if args.flow_between_stores is not None:
+        decoder_properties.hyd_model_net_props.flow_between_stores = args.flow_between_stores
+    if args.num_stores is not None:
+        decoder_properties.hyd_model_net_props.store_dim = args.num_stores
+    if args.encoding_dim is not None:
+        encoder_properties.hydro_encoding_output_dim = args.encoding_dim
 
     path = None
     if args.reload:  # Find the most trained model to reload
