@@ -54,6 +54,11 @@ if __name__ == '__main__':
     if args.encoding_dim is not None:
         encoder_properties.hydro_encoding_output_dim = args.encoding_dim
 
+    dataloader_properties = DataloaderProperties()
+    if args.years_per_sample is not None:
+        dataloader_properties.decoder_years_per_sample = args.years_per_sample
+        dataloader_properties.encoder_years_per_sample = args.years_per_sample
+
     path = None
     if args.reload:  # Find the most trained model to reload
         for i in range(20, 0, -1):
@@ -62,7 +67,7 @@ if __name__ == '__main__':
                 print("Reload from " + path)
                 break
 
-    train_test_everything(1, 1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
+    train_test_everything(1, r"/cw3e/mead/projects/cwp101/scratch/hilarymcmillan/camels-us/basin_dataset_public_v1p2",
                           path, 'models', data_root=r"/home/hilarymcmillan/hydro/HydroML/data",
                           encoder_properties=encoder_properties, decoder_properties=decoder_properties, training_properties=training_properties,
-                          years_per_sample=args.years_per_sample)
+                          dataloader_properties=dataloader_properties)

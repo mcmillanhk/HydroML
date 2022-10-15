@@ -88,19 +88,19 @@ def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_t
     return train_loader, validate_loader, test_loader, dataset_properties
 
 
-def load_inputs(camels_path, data_root, subsample_data, batch_size, load_train, load_validate, load_test, encoder_years, decoder_years=None):
-    train_loader_enc, validate_loader_enc, test_loader_enc, dataset_properties = load_inputs_years(subsample_data,
-                                                                                       camels_path, data_root, batch_size,
-                                                                                       load_train, load_validate,
-                                                                                       load_test, encoder_years)
-    if decoder_years is None or decoder_years == encoder_years:
+def load_inputs(camels_path, data_root, batch_size, load_train, load_validate, load_test,
+                dataloader_properties):
+    train_loader_enc, validate_loader_enc, test_loader_enc, dataset_properties = \
+        load_inputs_years(dataloader_properties.subsample_data, camels_path, data_root, batch_size, load_train,
+                          load_validate, load_test, dataloader_properties.encoder_years_per_sample)
+    if dataloader_properties.encoder_years_per_sample == dataloader_properties.decoder_years_per_sample:
         (train_loader_dec, validate_loader_dec, test_loader_dec) = (train_loader_enc, validate_loader_enc,
                                                                     test_loader_enc)
     else:
-        train_loader_dec, validate_loader_dec, test_loader_dec, dataset_properties = load_inputs_years(subsample_data,
-                                                                                       camels_path, data_root, batch_size,
-                                                                                       load_train, load_validate,
-                                                                                       load_test, decoder_years)
+        train_loader_dec, validate_loader_dec, test_loader_dec, dataset_properties = \
+            load_inputs_years(dataloader_properties.subsample_data, camels_path, data_root, batch_size, load_train,
+                              load_validate, load_test, dataloader_properties.decoder_years_per_sample)
+
     return DataLoaders(train_loader_enc, train_loader_dec) if load_train else None,\
            DataLoaders(validate_loader_enc, validate_loader_dec) if load_validate else None, \
            DataLoaders(test_loader_enc, test_loader_dec) if load_test else None, dataset_properties
@@ -1787,20 +1787,21 @@ def preview_data(train_loader, hyd_data_labels, sig_labels):
 # \camels_path: path to Camels-US dataset (and unzip CAMELS ATTRIBUTES inside this)
 # \data_root: Path to directory from git containing train/test/validate split plus US states outline
 # Set encoder and decoder hyperparameters in Util.py
-def train_test_everything(subsample_data, seed, camels_path,
+def train_test_everything(seed, camels_path,
                           model_load_path,
                           model_store_path,
                           data_root,
                           encoder_properties=EncoderProperties(), decoder_properties=DecoderProperties(),
                           training_properties=TrainingProperties(),
-                          years_per_sample=1
+                          dataloader_properties=DataloaderProperties()
                           ):
     torch.manual_seed(seed)
 
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=training_properties.batch_size,
+        = load_inputs(camels_path, data_root, dataloader_properties=dataloader_properties,
+                      batch_size=training_properties.batch_size,
                       load_train=True, load_validate=True,
-                      load_test=False, encoder_years=years_per_sample, decoder_years=years_per_sample)
+                      load_test=False, )
 
     states = load_states(data_root)
 
@@ -1819,14 +1820,16 @@ def train_test_everything(subsample_data, seed, camels_path,
                                                                             encoder_properties, decoder_properties)
 
     train_encoder_decoder(1200, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
-            dataset_properties, training_properties, model_store_path, (subsample_data <= 0), states, data_root)
+                          dataset_properties, training_properties, model_store_path,
+                          dataloader_properties.subsample_data <= 0, states, data_root)
 
 
 def reduce_encoding(subsample_data, model_load_path, model_io_path):
     training_properties = TrainingProperties()
+    dataloader_properties=DataloaderProperties()
     train_loader, validate_loader, test_loader, dataset_properties \
-        = load_inputs(subsample_data=subsample_data, batch_size=training_properties.batch_size, load_train=True, load_validate=True,
-                      load_test=False, encoder_years=1, decoder_years=1)
+        = load_inputs(batch_size=training_properties.batch_size, load_train=True, load_validate=True,
+                      load_test=False, dataloader_properties=dataloader_properties)
 
     model_store_path = model_io_path + '/out/'
     temp_store_path = model_io_path + '/temp/'
@@ -1942,11 +1945,11 @@ def do_ablation_test():
 # \data_root: Path to directory from git containing train/test/validate split plus US states outline
 # \subsample_data: 1 to load every datapoint; 2 to load every 2nd datapoint etc. For fast testing.
 # \model_load_paths: List of (model_load_path, "Model name") tuples.
-def compare_models(camels_path, data_root, subsample_data, model_load_paths):
+def compare_models(camels_path, data_root, model_load_paths, dataloader_properties = DataloaderProperties()):
     training_properties = TrainingProperties()
     dataset_train, dataset_val, dataset_test, dataset_properties \
-        = load_inputs(camels_path, data_root, subsample_data=subsample_data, batch_size=training_properties.batch_size, load_train=True, load_validate=True, load_test=False,
-                      encoder_years=1, decoder_years=1)
+        = load_inputs(camels_path, data_root, batch_size=training_properties.batch_size, load_train=True, load_validate=True, load_test=False,
+                      dataloader_properties=dataloader_properties)
 
     all_datasets = [dataset_train, dataset_val, dataset_test]
     datasets = []
@@ -1995,9 +1998,12 @@ def compare_models(camels_path, data_root, subsample_data, model_load_paths):
 #Test whether/how well this encoder structure can learn existing CAMELS signatures.
 def can_encoder_learn_sigs(subsample_data):
     batch_size = TrainingProperties().batch_size
+    dataloader_properties = DataloaderProperties()
+    dataloader_properties.encoder_years_per_sample=5
+    dataloader_properties.decoder_years_per_sample=5
     dataset_train, dataset_validate, _, dataset_properties \
-        = load_inputs(subsample_data=subsample_data, batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
-                      encoder_years=5)
+        = load_inputs(batch_size=batch_size, load_train=True, load_validate=True, load_test=False,
+                      dataloader_properties=dataloader_properties)
     encoder_properties = EncoderProperties()
     encoder = ConvEncoder(dataset_properties, encoder_properties).double()
     train_encoder_only(encoder, dataset_train, dataset_validate, dataset_properties, encoder_properties, None)

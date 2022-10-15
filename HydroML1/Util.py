@@ -17,6 +17,15 @@ class TrainingProperties:
     huber_thresh = 0.5
     #Should years per sample go here? Subsample_data?
 
+
+class DataloaderProperties:
+    subsample_data = 1
+    encoder_years_per_sample = 1
+    decoder_years_per_sample = 1
+    newman_split = False
+    ablation_test = False
+
+
 class EncType(Enum):
     NoEncoder = 0
     LSTMEncoder = 1

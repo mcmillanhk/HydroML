@@ -85,7 +85,7 @@ class CamelsDataset(Dataset):
             for idx_site in range(num_to_load):
                 print(f"Load {idx_site}/{num_to_load}")
                 self.load_one_site(dataset_properties, str(self.gauge_id_file.iloc[idx_site, 0]))
-        else:
+        else:  # ablation test
             while len(self.all_items) == 0:
                 idx_site = np.random.randint(0, num_sites)
                 self.load_one_site(dataset_properties, str(self.gauge_id_file.iloc[idx_site, 0]) if gauge_id is None else gauge_id, ablation_train, ablation_validate)
