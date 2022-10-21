@@ -1829,7 +1829,7 @@ def train_test_everything(seed, camels_path,
                                                                             model_load_path, training_properties.batch_size,
                                                                             encoder_properties, decoder_properties)
 
-    train_encoder_decoder(1200, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
+    train_encoder_decoder(2500, train_loader, validate_loader, encoder, decoder, encoder_properties, decoder_properties,
                           dataset_properties, training_properties, model_store_path,
                           dataloader_properties.subsample_data <= 0, states, data_root)
 
