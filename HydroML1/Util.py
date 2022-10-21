@@ -26,6 +26,12 @@ class DataloaderProperties:
     ablation_test = False
 
 
+class Splits(Enum):
+    Train = 0
+    Validate = 1
+    Test = 2
+
+
 class EncType(Enum):
     NoEncoder = 0
     LSTMEncoder = 1

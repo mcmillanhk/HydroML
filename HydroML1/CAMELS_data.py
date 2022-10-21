@@ -19,18 +19,11 @@ cfs2mm = 2.446575546
 
 class CamelsDataset(Dataset):
     def __init__(self, gauge_id_file, camels_root, data_root,
-                 dataset_properties: DatasetProperties, subsample_data, ablation_train=False, ablation_validate=False,
+                 dataset_properties: DatasetProperties, subsample_data, split,
                  gauge_id=None, num_years=-1):
         root_dir_flow = os.path.join(camels_root, 'usgs_streamflow')
         root_dir_climate = os.path.join(camels_root, 'basin_mean_forcing', 'daymet')
         root_dir_camels_attributes = os.path.join(camels_root, r'camels_attributes_v2.0')
-
-        if gauge_id_file is None:
-            self.gauge_id_file = pd.DataFrame(data={'gauge_id': [gauge_id]})
-        else:
-            self.gauge_id_file = pd.read_csv(gauge_id_file, dtype=str, sep='\t')
-            # Fix the IDs here that lost the leading zero (or maybe we should use int everywhere for gauge IDs?)
-            self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].apply(lambda gauge_id: gauge_id if len(gauge_id) == 8 else ('0'+str(gauge_id)))
 
         csv_file_attrib = [os.path.join(root_dir_camels_attributes, 'camels_' + s + '.txt') for s in
                            ['soil', 'topo', 'vege', 'geol']]
@@ -53,17 +46,29 @@ class CamelsDataset(Dataset):
         self.signatures_frame = pd.read_csv(csv_file, sep=';', dtype=types_dict)
         self.signatures_frame.drop('slope_fdc', axis=1, inplace=True)
         self.signatures_frame.dropna(inplace=True)
+        for name, normalizer in dataset_properties.sig_normalizers.items():
+            self.signatures_frame[name] = self.signatures_frame[name].transform(lambda x: x * normalizer)
 
         extra_sigs = [data_root + r'/extra_sigs/gw_array.csv', data_root + r'/extra_sigs/of_array2.csv']
         self.extra_sigs_files = CamelsDataset.read_attributes(extra_sigs, ',')
         CamelsDataset.remove_nan(self.extra_sigs_files)
 
+        if gauge_id_file is None:
+            if subsample_data > 0:
+                print("Loading data with Newman split. {split=}")
+                self.gauge_id_file = self.signatures_frame[['gauge_id']]
+            else:
+                print(f"Loading data for {gauge_id} for ablation testing. {split=}")
+                self.gauge_id_file = pd.DataFrame(data={'gauge_id': [gauge_id]})
+        else:
+            print(f"Loading data split by catchment. {split=}")
+            self.gauge_id_file = pd.read_csv(gauge_id_file, dtype=str, sep='\t')
+            # Fix the IDs here that lost the leading zero (or maybe we should use int everywhere for gauge IDs?)
+            self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].apply(lambda gauge_id: gauge_id if len(gauge_id) == 8 else ('0'+str(gauge_id)))
+
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
         self.years_per_sample = num_years
-
-        for name, normalizer in dataset_properties.sig_normalizers.items():
-            self.signatures_frame[name] = self.signatures_frame[name].transform(lambda x: x * normalizer)
 
         """Check amount of flow data for each site and build a table of this"""
         self.siteyears = pd.DataFrame(index=self.signatures_frame.iloc[:, 0],
@@ -84,11 +89,14 @@ class CamelsDataset(Dataset):
             num_to_load = max(int(num_sites / subsample_data), 1)
             for idx_site in range(num_to_load):
                 print(f"Load {idx_site}/{num_to_load}")
-                self.load_one_site(dataset_properties, str(self.gauge_id_file.iloc[idx_site, 0]))
+                self.load_one_site(dataset_properties, str(self.gauge_id_file.iloc[idx_site, 0]), False,
+                                   gauge_id_file is None, split)
         else:  # ablation test
             while len(self.all_items) == 0:
                 idx_site = np.random.randint(0, num_sites)
-                self.load_one_site(dataset_properties, str(self.gauge_id_file.iloc[idx_site, 0]) if gauge_id is None else gauge_id, ablation_train, ablation_validate)
+                self.load_one_site(dataset_properties,
+                                   str(self.gauge_id_file.iloc[idx_site, 0]) if gauge_id is None else gauge_id,
+                                   True, split)
 
     @staticmethod
     def remove_nan(df):
@@ -117,12 +125,12 @@ class CamelsDataset(Dataset):
                                              right_on='gauge_id')
         return combined_attrib_file
 
-    def load_one_site(self, dataset_properties, gauge_id, ablation_train=False, ablation_validate=False):
+    def load_one_site(self, dataset_properties, gauge_id, is_ablation: bool, newman_split: bool, split: Splits):
         """Read in climate and flow data for this site"""
         flow_data_name = self.get_streamflow_filename(gauge_id)
         flow_data = pd.read_csv(flow_data_name, sep='\s+', header=None, usecols=[1, 2, 3, 4, 5],
                                 names=["year", "month", "day", "flow(cfs)", "qc"])
-        #sigs = self.signatures_frame.loc[self.signatures_frame['gauge_id'] == gauge_id]
+
         climate_data_name = self.get_met_filename(gauge_id)
         climate_data = pd.read_csv(climate_data_name, sep='\t', skiprows=4, header=None,
                                    usecols=[0, 1, 2, 3, 4, 5, 6, 7],
@@ -152,10 +160,28 @@ class CamelsDataset(Dataset):
         water_years = flow_data[select_water_year]
         indices = flow_data.index[select_water_year]
 
-        range_end = water_years.shape[0] - self.years_per_sample
-        if ablation_train:
-            range_end = range_end - 3
-        range_start = (range_end - 3) if ablation_validate else 0
+        range_start = 0
+        latest_range_end = water_years.shape[0] - self.years_per_sample
+        range_end = latest_range_end
+        if is_ablation:
+            if split == Splits.Train:
+                range_end = range_end - 3
+            range_start = (range_end - 3) if split == Splits.Validate else 0
+
+        if newman_split:
+            if is_ablation:
+                raise Exception("newman_split not compatible with ablation testing")
+            train_validate_split = min(latest_range_end, range_start+15)  # First 15 years
+            validate_test_split =  (train_validate_split+latest_range_end)//2  # Divide remaining period into 2
+            if split == Splits.Train:
+                range_start = 0
+                range_end = train_validate_split
+            elif split == Splits.Validate:
+                range_start = train_validate_split
+                range_end = validate_test_split
+            elif split == Splits.Test:
+                range_start = validate_test_split
+                range_end = latest_range_end
 
         if range_start >= range_end:
             print("Insufficient data for site " + gauge_id)

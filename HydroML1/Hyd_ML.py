@@ -54,23 +54,30 @@ def load_states(data_root):
     return shp.Reader(data_root + "/states_shapefile/cb_2017_us_state_5m.shp")  # From https://www2.census.gov/geo/tiger/GENZ2017/shp/
 
 
-def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_train, load_validate, load_test, num_years):
-    csv_file_train = os.path.join(data_root, 'train.txt')
-    csv_file_validate = os.path.join(data_root, 'validate.txt') if subsample_data>0 else csv_file_train
-    csv_file_test = os.path.join(data_root, 'test.txt')
+def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_train, load_validate, load_test,
+                      num_years, newman_split=False):
+    if newman_split:
+        # Split input into train/test/validate by time (so we're training on the same catchments as we test on)
+        csv_file_train = None
+        csv_file_validate = None
+        csv_file_test = None
+    else:
+        # Split input into train/test/validate by catchment
+        csv_file_train = os.path.join(data_root, 'train.txt')
+        csv_file_validate = os.path.join(data_root, 'validate.txt') if subsample_data>0 else csv_file_train
+        csv_file_test = os.path.join(data_root, 'test.txt')
 
-    # Camels Dataset
     dataset_properties = DatasetProperties()
 
     train_loader = setup_dataloader(batch_size, camels_root, csv_file_train, data_root, dataset_properties, load_train,
-                                    num_years, subsample_data, True, True, False)
+                                    num_years, subsample_data, True, Splits.Train)
 
     test_loader = setup_dataloader(batch_size, camels_root, csv_file_test, data_root, dataset_properties, load_test,
-                                   num_years, subsample_data, False, False, False)
+                                   num_years, subsample_data, False, Splits.Test)
 
     gauge_id = train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data <= 0 else None
     validate_loader = setup_dataloader(batch_size, camels_root, csv_file_validate, data_root, dataset_properties,
-                                       load_validate, num_years, subsample_data, True, False, True, gauge_id)
+                                       load_validate, num_years, subsample_data, True, Splits.Validate, gauge_id)
 
     if subsample_data <= 0:
         check_dataloaders(train_loader, validate_loader)
@@ -78,14 +85,13 @@ def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_t
     return train_loader, validate_loader, test_loader, dataset_properties
 
 
-def setup_dataloader(batch_size, camels_root, csv_file_train, data_root, dataset_properties, load_train, num_years,
-                     subsample_data, shuffle, ablation_train, ablation_validate, gauge_id=None):
-    if not load_train:
+def setup_dataloader(batch_size, camels_root, csv_file, data_root, dataset_properties, loadme, num_years,
+                     subsample_data, shuffle, split, gauge_id=None):
+    if not loadme:
         return None
 
-    train_dataset = Cd.CamelsDataset(csv_file_train, camels_root, data_root, dataset_properties,
-                                     subsample_data=subsample_data, ablation_train=ablation_train,
-                                     ablation_validate=ablation_validate, num_years=num_years, gauge_id=gauge_id)
+    train_dataset = Cd.CamelsDataset(csv_file, camels_root, data_root, dataset_properties,
+                                     subsample_data, split, num_years=num_years, gauge_id=gauge_id)
     return DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn)
 
 
@@ -94,14 +100,16 @@ def load_inputs(camels_path, data_root, batch_size, load_train, load_validate, l
                 dataloader_properties):
     train_loader_enc, validate_loader_enc, test_loader_enc, dataset_properties = \
         load_inputs_years(dataloader_properties.subsample_data, camels_path, data_root, batch_size, load_train,
-                          load_validate, load_test, dataloader_properties.encoder_years_per_sample)
+                          load_validate, load_test, dataloader_properties.encoder_years_per_sample,
+                          dataloader_properties.newman_split)
     if dataloader_properties.encoder_years_per_sample == dataloader_properties.decoder_years_per_sample:
         (train_loader_dec, validate_loader_dec, test_loader_dec) = (train_loader_enc, validate_loader_enc,
                                                                     test_loader_enc)
     else:
         train_loader_dec, validate_loader_dec, test_loader_dec, dataset_properties = \
             load_inputs_years(dataloader_properties.subsample_data, camels_path, data_root, batch_size, load_train,
-                              load_validate, load_test, dataloader_properties.decoder_years_per_sample)
+                              load_validate, load_test, dataloader_properties.decoder_years_per_sample,
+                              dataloader_properties.newman_split)
 
     return DataLoaders(train_loader_enc, train_loader_dec) if load_train else None,\
            DataLoaders(validate_loader_enc, validate_loader_dec) if load_validate else None, \

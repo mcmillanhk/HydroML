@@ -18,7 +18,8 @@ if __name__ == '__main__':
     parser.add_argument('--reload', type=int, default=0, nargs='?',
                         help='Whether to reload the last model from the same directory (E200)')
     parser.add_argument('--log_batch_size', type=int, nargs='?', default=None)
-    parser.add_argument('--years_per_sample', type=int, nargs='?', default=1)
+    parser.add_argument('--years_per_sample', type=int, nargs='?', default=None)
+    parser.add_argument('--newman_split', type=bool, nargs='?', default=None)
     parser.add_argument('--interstore_weight_eps', type=int, nargs='?', default=None)
     parser.add_argument('--weight_decay', type=int, nargs='?', default=None)
     parser.add_argument('--lr', type=int, nargs='?', default=None)
@@ -58,6 +59,9 @@ if __name__ == '__main__':
     if args.years_per_sample is not None:
         dataloader_properties.decoder_years_per_sample = args.years_per_sample
         dataloader_properties.encoder_years_per_sample = args.years_per_sample
+
+    if args.newman_split is not None:
+        dataloader_properties.newman_split = args.newman_split
 
     path = None
     if args.reload:  # Find the most trained model to reload
