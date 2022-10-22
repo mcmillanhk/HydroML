@@ -19,7 +19,7 @@ cfs2mm = 2.446575546
 
 class CamelsDataset(Dataset):
     def __init__(self, gauge_id_file, camels_root, data_root,
-                 dataset_properties: DatasetProperties, subsample_data, split,
+                 dataset_properties: DatasetProperties, subsample_data, split, newman_split,
                  gauge_id=None, num_years=-1):
         root_dir_flow = os.path.join(camels_root, 'usgs_streamflow')
         root_dir_climate = os.path.join(camels_root, 'basin_mean_forcing', 'daymet')
@@ -53,18 +53,10 @@ class CamelsDataset(Dataset):
         self.extra_sigs_files = CamelsDataset.read_attributes(extra_sigs, ',')
         CamelsDataset.remove_nan(self.extra_sigs_files)
 
-        if gauge_id_file is None:
-            if subsample_data > 0:
-                print("Loading data with Newman split. {split=}")
-                self.gauge_id_file = self.signatures_frame[['gauge_id']]
-            else:
-                print(f"Loading data for {gauge_id} for ablation testing. {split=}")
-                self.gauge_id_file = pd.DataFrame(data={'gauge_id': [gauge_id]})
-        else:
-            print(f"Loading data split by catchment. {split=}")
-            self.gauge_id_file = pd.read_csv(gauge_id_file, dtype=str, sep='\t')
-            # Fix the IDs here that lost the leading zero (or maybe we should use int everywhere for gauge IDs?)
-            self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].apply(lambda gauge_id: gauge_id if len(gauge_id) == 8 else ('0'+str(gauge_id)))
+        print(f"Loading data {split=}")
+        self.gauge_id_file = pd.read_csv(gauge_id_file, dtype=str, sep='\t')
+        # Fix the IDs here that lost the leading zero (or maybe we should use int everywhere for gauge IDs?)
+        self.gauge_id_file['gauge_id'] = self.gauge_id_file['gauge_id'].apply(lambda gauge_id: gauge_id if len(gauge_id) == 8 else ('0'+str(gauge_id)))
 
         self.root_dir_climate = root_dir_climate
         self.root_dir_flow = root_dir_flow
@@ -90,13 +82,13 @@ class CamelsDataset(Dataset):
             for idx_site in range(num_to_load):
                 print(f"Load {idx_site}/{num_to_load}")
                 self.load_one_site(dataset_properties, str(self.gauge_id_file.iloc[idx_site, 0]), False,
-                                   gauge_id_file is None, split)
+                                   newman_split, split)
         else:  # ablation test
             while len(self.all_items) == 0:
                 idx_site = np.random.randint(0, num_sites)
                 self.load_one_site(dataset_properties,
                                    str(self.gauge_id_file.iloc[idx_site, 0]) if gauge_id is None else gauge_id,
-                                   True, split)
+                                   True, False, split)
 
     @staticmethod
     def remove_nan(df):

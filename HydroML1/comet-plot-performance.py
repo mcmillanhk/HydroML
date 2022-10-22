@@ -16,10 +16,11 @@ def plot_one(sd):
     ax.set_xlabel("epoch")
 
     dirs = [d for d in os.scandir(sd) if d.is_dir()]
-    dirs.sort(key=lambda x: int(parse('output{}', x.name)[0]))
+    dirs.sort(key=lambda x: parse_output_num(x))
+    labels = [parse_output_num(d) * 2 for d in dirs]
     vals = []
-    colors = plt.cm.jet(np.linspace(0, 1, len(dirs)))
-    for dir, col in zip(dirs, colors):
+    colors = plt.cm.jet(np.linspace(0, 1, len(labels)))
+    for dir, label, col in zip(dirs, labels, colors):
         path = os.path.join(dir, "models/progress.log")
         progress = open(path, 'r')
         lines = progress.readlines()
@@ -36,7 +37,7 @@ def plot_one(sd):
             print(f"Error: {path} did not run or log did not parse")
         else:
             ax.plot(moving_average(train, i=10), '--', color=col)
-            ax.plot(moving_average(val, i=10), color=col, label=dir.name)
+            ax.plot(moving_average(val, i=10), color=col, label=str(label))
 
             vals.append(np.mean(val[-50:]))
     ax.set_ylim(bottom=0.65)
@@ -47,11 +48,16 @@ def plot_one(sd):
     ax2 = fig.add_subplot(1, 1, 1)
     ax2.set_title("Final validation error: " + sd.name)
     ax2.set_ylabel("val loss")
-    ax2.set_xlabel("run")
-    ax2.plot(vals)
+    ax2.set_xlabel("Parameter value")
+    ax2.plot(vals, marker="o", linestyle="None")
     ax2.set_xticks(range(len(dirs)))
-    ax2.axes.xaxis.set_ticklabels([d.name for d in dirs])
+    ax2.axes.xaxis.set_ticklabels(labels)
     plt.show()
+
+
+def parse_output_num(x):
+    return int(parse('output{}', x.name)[0])
+
 
 if __name__ == '__main__':
     path = sys.argv[1]

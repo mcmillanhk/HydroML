@@ -58,9 +58,9 @@ def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_t
                       num_years, newman_split=False):
     if newman_split:
         # Split input into train/test/validate by time (so we're training on the same catchments as we test on)
-        csv_file_train = None
-        csv_file_validate = None
-        csv_file_test = None
+        csv_file_train = os.path.join(data_root, 'newman-2017.txt')
+        csv_file_validate = csv_file_train
+        csv_file_test = csv_file_train
     else:
         # Split input into train/test/validate by catchment
         csv_file_train = os.path.join(data_root, 'train.txt')
@@ -70,14 +70,15 @@ def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_t
     dataset_properties = DatasetProperties()
 
     train_loader = setup_dataloader(batch_size, camels_root, csv_file_train, data_root, dataset_properties, load_train,
-                                    num_years, subsample_data, True, Splits.Train)
+                                    num_years, subsample_data, True, Splits.Train, newman_split)
 
     test_loader = setup_dataloader(batch_size, camels_root, csv_file_test, data_root, dataset_properties, load_test,
-                                   num_years, subsample_data, False, Splits.Test)
+                                   num_years, subsample_data, False, Splits.Test, newman_split)
 
     gauge_id = train_loader.dataset[0].gauge_id.split('-')[0] if subsample_data <= 0 else None
     validate_loader = setup_dataloader(batch_size, camels_root, csv_file_validate, data_root, dataset_properties,
-                                       load_validate, num_years, subsample_data, True, Splits.Validate, gauge_id)
+                                       load_validate, num_years, subsample_data, True, Splits.Validate, newman_split,
+                                       gauge_id)
 
     if subsample_data <= 0:
         check_dataloaders(train_loader, validate_loader)
@@ -86,12 +87,12 @@ def load_inputs_years(subsample_data, camels_root, data_root, batch_size, load_t
 
 
 def setup_dataloader(batch_size, camels_root, csv_file, data_root, dataset_properties, loadme, num_years,
-                     subsample_data, shuffle, split, gauge_id=None):
+                     subsample_data, shuffle, split, newman_split, gauge_id=None):
     if not loadme:
         return None
 
     train_dataset = Cd.CamelsDataset(csv_file, camels_root, data_root, dataset_properties,
-                                     subsample_data, split, num_years=num_years, gauge_id=gauge_id)
+                                     subsample_data, split, newman_split, num_years=num_years, gauge_id=gauge_id)
     return DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn)
 
 
