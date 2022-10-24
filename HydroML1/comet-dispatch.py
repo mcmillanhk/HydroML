@@ -19,6 +19,8 @@ if __name__ == '__main__':
                         help='Whether to reload the last model from the same directory (E200)')
     parser.add_argument('--log_batch_size', type=int, nargs='?', default=None)
     parser.add_argument('--years_per_sample', type=int, nargs='?', default=None)
+    parser.add_argument('--encoder_years_per_sample', type=int, nargs='?', default=None)
+    parser.add_argument('--decoder_years_per_sample', type=int, nargs='?', default=None)
     parser.add_argument('--newman_split', type=bool, nargs='?', default=None)
     parser.add_argument('--interstore_weight_eps', type=int, nargs='?', default=None)
     parser.add_argument('--weight_decay', type=int, nargs='?', default=None)
