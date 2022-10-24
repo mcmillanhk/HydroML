@@ -60,6 +60,11 @@ if __name__ == '__main__':
         dataloader_properties.decoder_years_per_sample = args.years_per_sample
         dataloader_properties.encoder_years_per_sample = args.years_per_sample
 
+    if args.encoder_years_per_sample is not None:
+        dataloader_properties.encoder_years_per_sample = args.encoder_years_per_sample
+    if args.decoder_years_per_sample is not None:
+        dataloader_properties.decoder_years_per_sample = args.decoder_years_per_sample
+
     if args.newman_split is not None:
         dataloader_properties.newman_split = args.newman_split
 
