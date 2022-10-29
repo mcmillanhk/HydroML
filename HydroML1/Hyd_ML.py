@@ -1469,7 +1469,7 @@ def train_encoder_decoder(output_epochs, train_loader, validate_loader, encoder,
             elif val_median < 0.9*max_val_median and epoch > 10:
                 break
 
-        save_frequency = 300
+        save_frequency = 300  # Must be a multiple of the search term in comet-dispatch
         model_store_path_inc = model_store_path + f"/Epoch{save_frequency*(epoch//save_frequency)}"
         if not os.path.exists(model_store_path_inc):
             os.mkdir(model_store_path_inc)
