@@ -72,7 +72,7 @@ if __name__ == '__main__':
 
     path = None
     if args.reload:  # Find the most trained model to reload
-        for i in range(20, 0, -1):
+        for i in range(1000, 0, -1):
             path = f"models/Epoch{i*100}"
             if os.path.exists(path):
                 print("Reload from " + path)

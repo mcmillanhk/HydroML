@@ -39,7 +39,7 @@ def plot_one(sd):
             ax.plot(moving_average(train, i=10), '--', color=col)
             ax.plot(moving_average(val, i=10), color=col, label=str(label))
 
-            vals.append(np.mean(val[-50:]))
+            vals.append(np.max(moving_average(val, i=10)))  # np.mean(val[-50:])
     ax.set_ylim(bottom=0.65)
     ax.legend()
     plt.show()
