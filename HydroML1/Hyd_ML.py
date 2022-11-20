@@ -21,6 +21,8 @@ from scipy import stats
 import matplotlib.ticker as mtick
 
 plotting_freq = 1
+save_figs=False
+
 perturbation = 0.1  # For method of Morris
 
 def savefig(name, plt, fig):
@@ -34,7 +36,8 @@ def savefig(name, plt, fig):
     #    f.write(output.getbuffer())
 
 def save_show_close(name, plt, fig):
-    savefig(name, plt, fig)
+    if save_figs:
+        savefig(name, plt, fig)
     plt.show()
     plt.close('all')
 
@@ -150,7 +153,8 @@ class ConvEncoder(nn.Module):
                           stride=encoder_properties.conv_stride,
                           padding=0),
                 nn.MaxPool1d(kernel_size=kernel_size, stride=encoder_properties.mp_stride, padding=(kernel_size-1)//2),
-                encoder_properties.get_activation()))
+                encoder_properties.get_activation(),
+                nn.BatchNorm1d(out_dim)))
         layers.append(
             nn.Conv1d(encoder_properties.encoding_hidden_dim, encoder_properties.hydro_encoding_output_dim,
                       kernel_size=kernel_size,
@@ -195,7 +199,8 @@ class Encoder(nn.Module):
         fixed_attribute_dim = len(encoder_properties.encoding_names(dataset_properties))
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
-                                 encoder_properties.get_activation(), nn.Dropout(dropout_rate))
+                                 encoder_properties.get_activation(), nn.Dropout(dropout_rate),
+                                 nn.BatchNorm1d(encoder_properties.encoding_hidden_dim))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
                                  nn.Sigmoid()) # , nn.Dropout(dropout_rate))
 
