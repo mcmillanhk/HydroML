@@ -2,6 +2,8 @@
 # Also implements the encoder (TODO move to own file)
 import io
 import shutil
+
+import scipy.signal as ss
 import scipy as sp
 from matplotlib.backends.backend_svg import FigureCanvasSVG
 
@@ -25,7 +27,7 @@ def savefig(name, plt, fig):
     fig_output = r"figures"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
-    plt.savefig(fig_output + r'/' + name + '.svg', format='svgz')
+    plt.savefig(fig_output + r'/' + name + '.eps', format='eps') # svg works. Maybe svgz.
     #output = io.BytesIO()
     #FigureCanvasSVG(plt.figure()).print_svgz(output)
     #with open(fig_output + r'/' + name + '.svg', "wb") as f:
@@ -117,8 +119,14 @@ def load_inputs(camels_path, data_root, batch_size, load_train, load_validate, l
            DataLoaders(test_loader_enc, test_loader_dec) if load_test else None, dataset_properties
 
 
+def median_filter(a, n):
+    return ss.medfilt(a, n)
+    #np.median(strided_app(a, n, 1), axis=1)
+
 
 def moving_average(a, i=100):
+    if i==None:
+        return a
     n = max(len(a) // i, 1)
     ret = np.cumsum(a, dtype=float)
     ret[n:] = ret[n:] - ret[:-n]

@@ -214,7 +214,7 @@ class DecoderProperties:
     class HydModelNetProperties:
         def __init__(self):
             self.scale_b = False
-            self.hidden_dim = 256
+            self.hidden_dim = 128
             self.flownet_intermediate_output_dim = 32
             self.num_layers = 4
             self.flow_between_stores = False  # Allow flow between stores; otherwise they're all connected only to out flow
