@@ -43,7 +43,7 @@ if __name__ == '__main__':
         training_properties.weight_decay = 0.005 * (args.weight_decay-1)
 
     if args.lr is not None:
-        training_properties.learning_rate = 0.0001 * args.lr
+        training_properties.learning_rate = 0.0005 * args.lr
 
     if args.huber_thresh is not None:
         training_properties.huber_thresh = 0.05 * args.huber_thresh
