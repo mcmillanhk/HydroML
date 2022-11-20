@@ -20,7 +20,7 @@ import pickle
 from scipy import stats
 import matplotlib.ticker as mtick
 
-plotting_freq = 0
+plotting_freq = 1
 perturbation = 0.1  # For method of Morris
 
 def savefig(name, plt, fig):

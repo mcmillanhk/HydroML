@@ -48,6 +48,7 @@ class HydModelNet(nn.Module):
                 layers.append(nn.ReLU())
             if i > 0 and i < num_layers-1 and dropout_rate > 0:
                 layers.append(nn.Dropout(dropout_rate))
+            layers.append(nn.BatchNorm1d(this_output_dim))
         return nn.Sequential(*layers)
 
     @staticmethod
