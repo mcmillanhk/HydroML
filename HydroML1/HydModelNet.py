@@ -39,6 +39,7 @@ class HydModelNet(nn.Module):
     def make_flow_net(self, num_layers, input_dim, hidden_dim):
         layers = []
         for i in range(num_layers):
+            is_last_layer = i >= num_layers - 1
             this_input_dim = input_dim if i == 0 else hidden_dim
             this_output_dim = hidden_dim if i < num_layers-1 else self.decoder_properties.flownet_intermediate_output_dim
             layers.append(nn.Linear(this_input_dim, this_output_dim))
@@ -46,9 +47,10 @@ class HydModelNet(nn.Module):
                 layers.append(nn.Sigmoid())
             else:
                 layers.append(nn.ReLU())
-            if i > 0 and i < num_layers-1 and dropout_rate > 0:
+            if i > 0 and not is_last_layer and dropout_rate > 0:
                 layers.append(nn.Dropout(dropout_rate))
-            layers.append(nn.BatchNorm1d(this_output_dim))
+            if not is_last_layer:
+                layers.append(nn.BatchNorm1d(this_output_dim, eps=1e-1))
         return nn.Sequential(*layers)
 
     @staticmethod

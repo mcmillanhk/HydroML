@@ -13,7 +13,7 @@ class TrainingProperties:
     weight_decay = 0
     water_balance_weight_eps = 0.02
     interstore_weight_eps = 0.03
-    learning_rate = 0.0002
+    learning_rate = 0.002
     huber_thresh = 0.5
     #Should years per sample go here? Subsample_data?
 

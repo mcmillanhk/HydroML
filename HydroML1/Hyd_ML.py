@@ -20,7 +20,7 @@ import pickle
 from scipy import stats
 import matplotlib.ticker as mtick
 
-plotting_freq = 1
+plotting_freq = 0
 save_figs=False
 
 perturbation = 0.1  # For method of Morris
@@ -154,7 +154,7 @@ class ConvEncoder(nn.Module):
                           padding=0),
                 nn.MaxPool1d(kernel_size=kernel_size, stride=encoder_properties.mp_stride, padding=(kernel_size-1)//2),
                 encoder_properties.get_activation(),
-                nn.BatchNorm1d(out_dim)))
+                nn.BatchNorm1d(out_dim, eps=1e-1)))
         layers.append(
             nn.Conv1d(encoder_properties.encoding_hidden_dim, encoder_properties.hydro_encoding_output_dim,
                       kernel_size=kernel_size,
@@ -200,7 +200,7 @@ class Encoder(nn.Module):
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
                                  encoder_properties.get_activation(), nn.Dropout(dropout_rate),
-                                 nn.BatchNorm1d(encoder_properties.encoding_hidden_dim))
+                                 nn.BatchNorm1d(encoder_properties.encoding_hidden_dim, eps=1e-1))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
                                  nn.Sigmoid()) # , nn.Dropout(dropout_rate))
 
