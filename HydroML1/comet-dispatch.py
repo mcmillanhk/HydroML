@@ -76,7 +76,7 @@ if __name__ == '__main__':
     if args.bn_eps is not None:
         bn_params.eps = 0.01 * (2 ** args.bn_eps)
     if args.bn_momentum is not None:
-        bn_params.momentum = None if args.bn_momentum == 1 else 0.01 * (2 ** args.bn_eps)
+        bn_params.momentum = None if args.bn_momentum == 1 else 0.01 * (2 ** args.bn_momentum)
     encoder_properties.bn_params = bn_params
     decoder_properties.hyd_model_net_props.bn_params = bn_params
 
