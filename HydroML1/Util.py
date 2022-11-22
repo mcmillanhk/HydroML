@@ -2,6 +2,7 @@
 
 from enum import Enum
 
+from torch import nn
 from torch.utils.data import DataLoader
 
 from DataPoint import *
@@ -17,6 +18,12 @@ class TrainingProperties:
     huber_thresh = 0.5
     #Should years per sample go here? Subsample_data?
 
+class BNParams:
+    eps = 0.1
+    momentum = 0.1
+
+    def get_batchnorm(self, dimension):
+        return nn.BatchNorm1d(dimension, eps=self.eps, momentum=self.momentum)
 
 class DataloaderProperties:
     subsample_data = 1
@@ -136,6 +143,7 @@ class DatasetProperties:
 
 class EncoderProperties:
     printed = False
+    bn_params = BNParams()
 
     def encoder_input_dim(self):
         return len(self.encoder_names)+1  # +1 for flow
@@ -212,6 +220,8 @@ class DecoderType(Enum):
 class DecoderProperties:
     # Properties specific to HydModelNet
     class HydModelNetProperties:
+        bn_params = BNParams()
+
         def __init__(self):
             self.scale_b = False
             self.hidden_dim = 128

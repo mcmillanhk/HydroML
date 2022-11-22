@@ -1,5 +1,6 @@
 # Script for plotting train/validate performance for a batch of runs
 import os
+import sys
 
 from matplotlib import pyplot as plt
 from parse import parse
@@ -58,7 +59,8 @@ def plot_one(title, dirlist, transform=lambda x: x, parameter_name="Parameter va
             break
 
     if all_train_val:
-        ax.set_ylim(bottom=0.65)
+        pass
+        #ax.set_ylim(bottom=0.65)
     else:
         ax.set_ylim(bottom=0.5)
 
@@ -98,7 +100,7 @@ def parse_output_num(x):
 
 
 if __name__ == '__main__':
-    if False:
+    if True:
         path = sys.argv[1]
 
         if os.path.exists(path + "/output1"):

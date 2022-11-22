@@ -154,7 +154,7 @@ class ConvEncoder(nn.Module):
                           padding=0),
                 nn.MaxPool1d(kernel_size=kernel_size, stride=encoder_properties.mp_stride, padding=(kernel_size-1)//2),
                 encoder_properties.get_activation(),
-                nn.BatchNorm1d(out_dim, eps=1e-1)))
+                encoder_properties.bn_params.get_batchnorm(out_dim)))
         layers.append(
             nn.Conv1d(encoder_properties.encoding_hidden_dim, encoder_properties.hydro_encoding_output_dim,
                       kernel_size=kernel_size,
@@ -200,9 +200,9 @@ class Encoder(nn.Module):
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
                                  encoder_properties.get_activation(), nn.Dropout(dropout_rate),
-                                 nn.BatchNorm1d(encoder_properties.encoding_hidden_dim, eps=1e-1))
+                                 encoder_properties.bn_params.get_batchnorm(encoder_properties.encoding_hidden_dim))
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
-                                 nn.Sigmoid()) # , nn.Dropout(dropout_rate))
+                                 nn.Sigmoid())  # , nn.Dropout(dropout_rate))
 
         self.encoder_properties = encoder_properties
         self.perturbation = None

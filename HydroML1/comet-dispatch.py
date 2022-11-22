@@ -26,6 +26,8 @@ if __name__ == '__main__':
     parser.add_argument('--weight_decay', type=int, nargs='?', default=None)
     parser.add_argument('--lr', type=int, nargs='?', default=None)
     parser.add_argument('--huber_thresh', type=int, nargs='?', default=None)
+    parser.add_argument('--bn_eps', type=int, nargs='?', default=None)
+    parser.add_argument('--bn_momentum', type=int, nargs='?', default=None)
 
     args = parser.parse_args()
 
@@ -69,6 +71,14 @@ if __name__ == '__main__':
 
     if args.newman_split is not None:
         dataloader_properties.newman_split = args.newman_split
+
+    bn_params = BNParams()
+    if args.bn_eps is not None:
+        bn_params.eps = 0.01 * (2 ** args.bn_eps)
+    if args.bn_momentum is not None:
+        bn_params.momentum = None if args.bn_momentum == 1 else 0.01 * (2 ** args.bn_eps)
+    encoder_properties.bn_params = bn_params
+    decoder_properties.hyd_model_net_props.bn_params = bn_params
 
     path = None
     if args.reload:  # Find the most trained model to reload

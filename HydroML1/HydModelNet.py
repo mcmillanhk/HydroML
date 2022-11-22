@@ -50,7 +50,7 @@ class HydModelNet(nn.Module):
             if i > 0 and not is_last_layer and dropout_rate > 0:
                 layers.append(nn.Dropout(dropout_rate))
             if not is_last_layer:
-                layers.append(nn.BatchNorm1d(this_output_dim, eps=1e-1))
+                layers.append(self.decoder_properties.bn_params.get_batchnorm(this_output_dim))
         return nn.Sequential(*layers)
 
     @staticmethod
