@@ -81,7 +81,7 @@ if __name__ == '__main__':
     encoder_properties.bn_params = bn_params
     decoder_properties.hyd_model_net_props.bn_params = bn_params
 
-    decoder_properties.detach_frequency = args.detach_frequency
+    decoder_properties.hyd_model_net_props.detach_frequency = args.detach_frequency
 
     path = None
     if args.reload:  # Find the most trained model to reload
