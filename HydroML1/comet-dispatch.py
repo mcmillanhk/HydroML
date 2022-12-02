@@ -28,6 +28,7 @@ if __name__ == '__main__':
     parser.add_argument('--huber_thresh', type=int, nargs='?', default=None)
     parser.add_argument('--bn_eps', type=int, nargs='?', default=None)
     parser.add_argument('--bn_momentum', type=int, nargs='?', default=None)
+    parser.add_argument('--detach_frequency', type=int, nargs='?', default=None)
 
     args = parser.parse_args()
 
@@ -79,6 +80,8 @@ if __name__ == '__main__':
         bn_params.momentum = None if args.bn_momentum == 1 else 0.01 * (2 ** args.bn_momentum)
     encoder_properties.bn_params = bn_params
     decoder_properties.hyd_model_net_props.bn_params = bn_params
+
+    decoder_properties.detach_frequency = args.detach_frequency
 
     path = None
     if args.reload:  # Find the most trained model to reload

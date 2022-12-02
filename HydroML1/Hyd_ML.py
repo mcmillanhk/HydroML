@@ -21,19 +21,16 @@ from scipy import stats
 import matplotlib.ticker as mtick
 
 plotting_freq = 0
-save_figs=False
+save_figs = False
 
 perturbation = 0.1  # For method of Morris
 
 def savefig(name, plt, fig):
-    fig_output = r"figures"
+    fig_output = r"figures-correlationAGU"
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
-    plt.savefig(fig_output + r'/' + name + '.eps', format='eps') # svg works. Maybe svgz.
-    #output = io.BytesIO()
-    #FigureCanvasSVG(plt.figure()).print_svgz(output)
-    #with open(fig_output + r'/' + name + '.svg', "wb") as f:
-    #    f.write(output.getbuffer())
+    for format in ['eps', 'svg']:
+        plt.savefig(fig_output + r'/' + name + '.' + format, format=format)  # svg works. Maybe svgz.
 
 def save_show_close(name, plt, fig):
     if save_figs:
@@ -153,8 +150,9 @@ class ConvEncoder(nn.Module):
                           stride=encoder_properties.conv_stride,
                           padding=0),
                 nn.MaxPool1d(kernel_size=kernel_size, stride=encoder_properties.mp_stride, padding=(kernel_size-1)//2),
-                encoder_properties.get_activation(),
-                encoder_properties.bn_params.get_batchnorm(out_dim)))
+                encoder_properties.get_activation()))
+        if encoder_properties.use_bn:
+            layers.append(encoder_properties.bn_params.get_batchnorm(out_dim))
         layers.append(
             nn.Conv1d(encoder_properties.encoding_hidden_dim, encoder_properties.hydro_encoding_output_dim,
                       kernel_size=kernel_size,
@@ -199,8 +197,11 @@ class Encoder(nn.Module):
         fixed_attribute_dim = len(encoder_properties.encoding_names(dataset_properties))
 
         self.fc1 = nn.Sequential(nn.Linear(cnn_output_dim + fixed_attribute_dim, encoder_properties.encoding_hidden_dim),
-                                 encoder_properties.get_activation(), nn.Dropout(dropout_rate),
-                                 encoder_properties.bn_params.get_batchnorm(encoder_properties.encoding_hidden_dim))
+                                 encoder_properties.get_activation(), nn.Dropout(dropout_rate))
+
+        if encoder_properties.use_bn:
+            self.fc1.append(encoder_properties.bn_params.get_batchnorm(encoder_properties.encoding_hidden_dim))
+
         self.fc2 = nn.Sequential(nn.Linear(encoder_properties.encoding_hidden_dim, encoder_properties.encoding_dim()),
                                  nn.Sigmoid())  # , nn.Dropout(dropout_rate))
 

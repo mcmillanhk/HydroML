@@ -14,7 +14,7 @@ class TrainingProperties:
     weight_decay = 0
     water_balance_weight_eps = 0.02
     interstore_weight_eps = 0.03
-    learning_rate = 0.002
+    learning_rate = 0.0002
     huber_thresh = 0.5
     #Should years per sample go here? Subsample_data?
 
@@ -23,6 +23,7 @@ class BNParams:
     momentum = 0.1
 
     def get_batchnorm(self, dimension):
+        return None
         return nn.BatchNorm1d(dimension, eps=self.eps, momentum=self.momentum)
 
 class DataloaderProperties:
@@ -143,6 +144,7 @@ class DatasetProperties:
 
 class EncoderProperties:
     printed = False
+    use_bn = False
     bn_params = BNParams()
 
     def encoder_input_dim(self):
@@ -220,6 +222,7 @@ class DecoderType(Enum):
 class DecoderProperties:
     # Properties specific to HydModelNet
     class HydModelNetProperties:
+        use_bn = False
         bn_params = BNParams()
 
         def __init__(self):
@@ -233,6 +236,7 @@ class DecoderProperties:
             self.decoder_include_attributes = False
             self.store_dim = 8
             self.weight_stores = 0.001
+            self.detach_frequency = None
 
         def b_length(self):
             return self.store_dim * (self.store_dim + 2) if self.flow_between_stores \

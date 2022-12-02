@@ -23,7 +23,7 @@ def plot_one(title, dirlist, transform=lambda x: x, parameter_name="Parameter va
 
     dirs = []
     for onedir in dirlist:
-        dirs += [d for d in os.scandir(onedir) if d.is_dir()]
+        dirs += [d for d in os.scandir(onedir) if d.is_dir() and parse('output{}', d.name) is not None]
 
     dirs.sort(key=lambda x: parse_output_num(x))
     labels = [transform(parse_output_num(d)) for d in dirs]

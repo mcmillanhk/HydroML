@@ -49,7 +49,7 @@ class HydModelNet(nn.Module):
                 layers.append(nn.ReLU())
             if i > 0 and not is_last_layer and dropout_rate > 0:
                 layers.append(nn.Dropout(dropout_rate))
-            if not is_last_layer:
+            if self.decoder_properties.use_bn and not is_last_layer:
                 layers.append(self.decoder_properties.bn_params.get_batchnorm(this_output_dim))
         return nn.Sequential(*layers)
 
@@ -127,6 +127,9 @@ class HydModelNet(nn.Module):
 
             if t == 0:
                 stores = init_stores = self.init_store_layer(encoding).exp()
+            if self.decoder_properties.detach_frequency is not None and t > 0 and \
+                (t + 1) % self.decoder_properties.detach_frequency == 0:
+                stores = stores.detach()
 
             climate_input = datapoints.climate_data[:, t, :]
             if self.decoder_properties.decoder_include_stores:
