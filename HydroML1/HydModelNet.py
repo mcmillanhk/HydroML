@@ -128,7 +128,7 @@ class HydModelNet(nn.Module):
             if t == 0:
                 stores = init_stores = self.init_store_layer(encoding).exp()
             if self.decoder_properties.detach_frequency is not None and t > 0 and \
-                (t + 1) % self.decoder_properties.detach_frequency == 0:
+                t % self.decoder_properties.detach_frequency == 0:
                 stores = stores.detach()
 
             climate_input = datapoints.climate_data[:, t, :]
