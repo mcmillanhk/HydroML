@@ -29,6 +29,7 @@ if __name__ == '__main__':
     parser.add_argument('--bn_eps', type=int, nargs='?', default=None)
     parser.add_argument('--bn_momentum', type=int, nargs='?', default=None)
     parser.add_argument('--detach_frequency', type=int, nargs='?', default=None)
+    parser.add_argument('--encode_attributes', type=bool, nargs='?', default=None)
 
     args = parser.parse_args()
 
@@ -59,6 +60,8 @@ if __name__ == '__main__':
         decoder_properties.hyd_model_net_props.store_dim = args.num_stores
     if args.encoding_dim is not None:
         encoder_properties.hydro_encoding_output_dim = args.encoding_dim
+    if args.encode_attributes is not None:
+        encoder_properties.encode_attributes = args.encode_attributes
 
     dataloader_properties = DataloaderProperties()
     if args.years_per_sample is not None:
