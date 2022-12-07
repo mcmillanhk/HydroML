@@ -30,6 +30,7 @@ if __name__ == '__main__':
     parser.add_argument('--bn_momentum', type=int, nargs='?', default=None)
     parser.add_argument('--detach_frequency', type=int, nargs='?', default=None)
     parser.add_argument('--encode_attributes', type=bool, nargs='?', default=None)
+    parser.add_argument('--encode_hydro_met_data', type=bool, nargs='?', default=None)
 
     args = parser.parse_args()
 
@@ -85,6 +86,9 @@ if __name__ == '__main__':
     decoder_properties.hyd_model_net_props.bn_params = bn_params
 
     decoder_properties.hyd_model_net_props.detach_frequency = args.detach_frequency
+
+    if args.encode_hydro_met_data is not None:
+        encoder_properties.encode_hydro_met_data = args.encode_hydro_met_data
 
     path = None
     if args.reload:  # Find the most trained model to reload

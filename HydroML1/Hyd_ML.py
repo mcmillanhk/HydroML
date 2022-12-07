@@ -30,7 +30,9 @@ def savefig(name, plt, fig):
     if not os.path.exists(fig_output):
         os.mkdir(fig_output)
     for format in ['eps', 'svg']:
-        plt.savefig(fig_output + r'/' + name + '.' + format, format=format)  # svg works. Maybe svgz.
+        filename = fig_output + r'/' + name + '.' + format
+        print(f"Saving {filename}")
+        plt.savefig(filename, format=format)  # svg works. Maybe svgz.
 
 def save_show_close(name, plt, fig):
     if save_figs:
